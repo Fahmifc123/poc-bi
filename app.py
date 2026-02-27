@@ -16,9 +16,11 @@ import json
 
 # OpenAI direct import (no LangChain to avoid torch/CUDA issues)
 from openai import OpenAI
+from dotenv import load_dotenv
 
-# Hardcoded API Key 
-HARDCODED_API_KEY =  apikey
+# Load .env (lokal). Di server, set OPENAI_API_KEY sebagai env var sistem.
+load_dotenv()
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 # =============================================================================
 # PAGE CONFIGURATION
 # =============================================================================
@@ -153,7 +155,7 @@ def load_data():
     
     # Try to load social media data with semicolon separator
     try:
-        df_sosmed = pd.read_csv('data_sosmed.csv', sep=';', low_memory=False)
+        df_sosmed = pd.read_csv('data_sosmed.csv', sep=',', low_memory=False)
         df_sosmed['source'] = 'Social Media'
         
         # Clean object_name column - remove leading '
@@ -211,10 +213,25 @@ def load_data():
     
     # Try to load online media data with semicolon separator
     try:
-        df_onm = pd.read_csv('data_onm.csv', sep=';', low_memory=False)
+        df_onm = pd.read_csv('data_onm.csv', sep=',', low_memory=False)
         df_onm['source'] = 'Online Media'
-        if 'date_created' in df_onm.columns:
-            df_onm['date'] = pd.to_datetime(df_onm['date_created'], format='%Y-%m-%d %H:%M:%S', errors='coerce')
+        # Detect date column (date_published or date_created)
+        date_col_onm = 'date_published' if 'date_published' in df_onm.columns else 'date_created' if 'date_created' in df_onm.columns else None
+        if date_col_onm:
+            df_onm['date'] = pd.to_datetime(df_onm[date_col_onm], format='%d/%m/%Y %H.%M.%S', errors='coerce')
+            if df_onm['date'].isna().all():
+                df_onm['date'] = pd.to_datetime(df_onm[date_col_onm], format='%Y-%m-%d %H:%M:%S', errors='coerce')
+            if df_onm['date'].isna().all():
+                df_onm['date'] = pd.to_datetime(df_onm[date_col_onm], errors='coerce')
+        # Map sentiment
+        if 'final_sentiment' not in df_onm.columns:
+            if 'sentiment' in df_onm.columns:
+                df_onm['final_sentiment'] = df_onm['sentiment'].astype(str).str.lstrip("'").str.lower().str.strip()
+            else:
+                df_onm['final_sentiment'] = 'neutral'
+        # Map content column
+        if 'content' not in df_onm.columns and 'body' in df_onm.columns:
+            df_onm['content'] = df_onm['body']
         if 'final_topic' not in df_onm.columns:
             df_onm['final_topic'] = 'Unknown'
         df_onm = df_onm.dropna(subset=['date'])
@@ -302,8 +319,6 @@ def get_openai_client(api_key=None):
         return OpenAI(api_key=api_key)
     elif os.environ.get("OPENAI_API_KEY"):
         return OpenAI()
-    elif HARDCODED_API_KEY:
-        return OpenAI(api_key=HARDCODED_API_KEY)
     return None
 
 # =============================================================================
@@ -971,7 +986,7 @@ def main():
                     
                     recommendation = generate_recommendation_llm(
                         current_topic, topic_negative_pct/100, topic_risk, narrative_summary,
-                        HARDCODED_API_KEY
+                        OPENAI_API_KEY
                     )
                     st.session_state['recommendation'] = recommendation
             
@@ -1043,7 +1058,7 @@ def main():
                 fig_eval.add_trace(go.Scatter(x=post_data['date'], y=post_data['negative_ratio'] * 100,
                                               mode='lines', name='Post-Intervention',
                                               line=dict(color='#28a745', width=2)))
-            fig_eval.add_vline(x=str(intervention_date), line_dash="dash", line_color="#0066cc", annotation_text="Intervention")
+            fig_eval.add_vline(x=pd.Timestamp(intervention_date).timestamp() * 1000, line_dash="dash", line_color="#0066cc", annotation_text="Intervention")
         else:
             fig_eval.add_annotation(text="No data available", showarrow=False, font=dict(size=20))
         
