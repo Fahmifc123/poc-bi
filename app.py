@@ -17,9 +17,8 @@ import json
 # OpenAI direct import (no LangChain to avoid torch/CUDA issues)
 from openai import OpenAI
 
-# Hardcoded API Key
-HARDCODED_API_KEY = "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"
-
+# Hardcoded API Key 
+HARDCODED_API_KEY =  apikey
 # =============================================================================
 # PAGE CONFIGURATION
 # =============================================================================
@@ -1055,3 +1054,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
