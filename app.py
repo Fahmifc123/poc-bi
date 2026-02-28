@@ -1141,8 +1141,17 @@ def main():
             try:
                 latest = daily_metrics.iloc[-1]
                 
+                # Debug: Show available columns
+                available_cols = list(daily_metrics.columns)
+                
                 # Check if columns exist before accessing
                 required_cols = ['negative_ratio', 'velocity', 'influencer_impact', 'misinformation_score']
+                missing_cols = [col for col in required_cols if col not in latest]
+                
+                if missing_cols:
+                    st.warning(f"Missing columns: {missing_cols}")
+                    st.caption(f"Available: {available_cols}")
+                
                 if all(col in latest for col in required_cols):
                     risk_components = [
                         {"Component": "Negative Ratio", "Weight": "30%", "Value": f"{latest['negative_ratio']:.3f}", "Score": f"{latest['negative_ratio'] * 0.30:.3f}"},
@@ -1160,12 +1169,23 @@ def main():
                     )])
                     fig_risk.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=220)
                     st.plotly_chart(fig_risk, use_container_width=True, config={'displayModeBar': False})
+                    
+                    # Show calculation info
+                    st.caption(f"Risk Score: {latest.get('risk_score', 0):.3f} | Data points: {len(daily_metrics)}")
                 else:
-                    st.info("Risk metrics not calculated yet")
+                    st.info("Calculating risk metrics...")
+                    # Show what we have
+                    if 'negative_ratio' in latest:
+                        st.caption(f"✓ Negative Ratio: {latest['negative_ratio']:.3f}")
+                    if 'velocity' in latest:
+                        st.caption(f"✓ Velocity: {latest['velocity']:.3f}")
             except Exception as e:
                 st.error(f"Error displaying risk breakdown: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
         else:
             st.info("No risk data available")
+            st.caption(f"daily_metrics shape: {daily_metrics.shape if not daily_metrics.empty else 'empty'}")
         st.markdown("</div>", unsafe_allow_html=True)
     
     # =============================================================================
