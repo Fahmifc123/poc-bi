@@ -13,6 +13,7 @@ from collections import Counter
 import re
 import os
 import json
+import csv
 
 # OpenAI direct import (no LangChain to avoid torch/CUDA issues)
 from openai import OpenAI
@@ -147,15 +148,43 @@ st.markdown("""
 # =============================================================================
 # DATA LOADING FUNCTIONS
 # =============================================================================
-@st.cache_data
+def detect_separator(filepath, sample_lines=5):
+    """Auto-detect CSV separator (, or ;) by reading a small sample of the file."""
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+            sample = ''.join(f.readline() for _ in range(sample_lines))
+        dialect = csv.Sniffer().sniff(sample, delimiters=',;|\t')
+        return dialect.delimiter
+    except Exception:
+        # Fallback: count occurrences in first line
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+                first_line = f.readline()
+            return ';' if first_line.count(';') > first_line.count(',') else ','
+        except Exception:
+            return ','  # default fallback
+
+@st.cache_data(ttl=3600)
 def load_data():
     """Load and combine social media and online news media datasets."""
     df_sosmed = None
     df_onm = None
     
-    # Try to load social media data with semicolon separator
+    # Try to load social media data (parquet-first, CSV fallback + auto-regenerate)
     try:
-        df_sosmed = pd.read_csv('data_sosmed.csv', sep=',', low_memory=False)
+        _csv_s = 'data_sosmed.csv'
+        _pq_s  = 'data_sosmed.parquet'
+        _pq_s_fresh = (
+            os.path.exists(_pq_s) and
+            (not os.path.exists(_csv_s) or
+             os.path.getmtime(_pq_s) >= os.path.getmtime(_csv_s))
+        )
+        if _pq_s_fresh:
+            df_sosmed = pd.read_parquet(_pq_s)
+        else:
+            sep_sosmed = detect_separator(_csv_s)
+            df_sosmed = pd.read_csv(_csv_s, sep=sep_sosmed, low_memory=False)
+            df_sosmed.to_parquet(_pq_s, index=False)
         df_sosmed['source'] = 'Social Media'
         
         # Clean object_name column - remove leading '
@@ -211,9 +240,21 @@ def load_data():
     except Exception as e:
         st.sidebar.error(f"Error loading sosmed: {str(e)}")
     
-    # Try to load online media data with semicolon separator
+    # Try to load online media data (parquet-first, CSV fallback + auto-regenerate)
     try:
-        df_onm = pd.read_csv('data_onm.csv', sep=',', low_memory=False)
+        _csv_o = 'data_onm.csv'
+        _pq_o  = 'data_onm.parquet'
+        _pq_o_fresh = (
+            os.path.exists(_pq_o) and
+            (not os.path.exists(_csv_o) or
+             os.path.getmtime(_pq_o) >= os.path.getmtime(_csv_o))
+        )
+        if _pq_o_fresh:
+            df_onm = pd.read_parquet(_pq_o)
+        else:
+            sep_onm = detect_separator(_csv_o)
+            df_onm = pd.read_csv(_csv_o, sep=sep_onm, low_memory=False)
+            df_onm.to_parquet(_pq_o, index=False)
         df_onm['source'] = 'Online Media'
         # Detect date column (date_published or date_created)
         date_col_onm = 'date_published' if 'date_published' in df_onm.columns else 'date_created' if 'date_created' in df_onm.columns else None
@@ -570,12 +611,27 @@ def main():
     st.markdown("<div class='sub-header'>Perception Intelligence & Decision Support System</div>", 
                 unsafe_allow_html=True)
     
-    df_sosmed, df_onm = load_data()
-    
-    # Sidebar info
+    # Sidebar: Refresh button — clears cache and forces reload from disk
     st.sidebar.markdown("### 📊 Data Status")
-    st.sidebar.info(f"Social Media: {len(df_sosmed)} records")
-    st.sidebar.info(f"Online Media: {len(df_onm)} records")
+    if st.sidebar.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+
+    df_sosmed, df_onm = load_data()
+
+    _sosmed_src = "parquet" if (
+        os.path.exists('data_sosmed.parquet') and
+        (not os.path.exists('data_sosmed.csv') or
+         os.path.getmtime('data_sosmed.parquet') >= os.path.getmtime('data_sosmed.csv'))
+    ) else "CSV"
+    _onm_src = "parquet" if (
+        os.path.exists('data_onm.parquet') and
+        (not os.path.exists('data_onm.csv') or
+         os.path.getmtime('data_onm.parquet') >= os.path.getmtime('data_onm.csv'))
+    ) else "CSV"
+    st.sidebar.info(f"Social Media: {len(df_sosmed):,} records [{_sosmed_src}]")
+    st.sidebar.info(f"Online Media: {len(df_onm):,} records [{_onm_src}]")
+    st.sidebar.caption("Ganti CSV lalu klik Refresh Data untuk update data.")
     
     # =============================================================================
     # TOP FILTER SECTION

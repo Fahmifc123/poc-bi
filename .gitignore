@@ -1,9 +1,10 @@
 # Secrets – JANGAN commit ke git
 .env
 
-# Data files
+# Data files (jangan push ke git — transfer ke server secara manual)
 data_sosmed.csv
 data_onm.csv
+*.parquet
 
 # Python
 __pycache__/
@@ -19,3 +20,4 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+benchmark_loading.py
