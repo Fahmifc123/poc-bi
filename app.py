@@ -38,62 +38,36 @@ st.set_page_config(
 # =============================================================================
 st.markdown("""
 <style>
-    /* Force Light Mode */
-    .stApp {
-        background-color: white;
-        color: #1a1a2e;
-    }
-    
-    /* Force all containers to light theme */
-    .main .block-container {
-        background-color: white;
-    }
-    
-    /* Force sidebar light */
-    section[data-testid="stSidebar"] {
-        background-color: #f8f9fa;
-    }
-    
-    /* Force text colors */
-    .stMarkdown, .stText, p, span, div {
-        color: #1a1a2e !important;
-    }
-    
-    /* Auto-adaptive header colors based on theme */
+    /* Component Styles */
     .main-header { 
         font-size: 2rem; 
         font-weight: 700; 
-        color: #1a1a2e; 
         margin-bottom: 0.5rem; 
     }
     .sub-header { 
         font-size: 1rem; 
-        color: #6c757d; 
         margin-bottom: 2rem; 
     }
     .section-header { 
         font-size: 1.3rem; 
         font-weight: 600; 
-        color: #1a1a2e; 
         margin: 2rem 0 1rem 0; 
         padding-bottom: 0.5rem; 
         border-bottom: 2px solid #0066cc; 
     }
     .metric-card { 
-        background-color: #f8f9fa; 
+        background-color: rgba(128, 128, 128, 0.1); 
         border-radius: 10px; 
         padding: 1.5rem; 
         box-shadow: 0 2px 8px rgba(0,0,0,0.1); 
-        border: 1px solid #dee2e6; 
+        border: 1px solid rgba(128, 128, 128, 0.2); 
     }
     .metric-value { 
         font-size: 1.8rem; 
         font-weight: 700; 
-        color: #1a1a2e; 
     }
     .metric-label { 
         font-size: 0.8rem; 
-        color: #6c757d; 
         text-transform: uppercase; 
         letter-spacing: 0.5px; 
     }
@@ -130,11 +104,11 @@ st.markdown("""
     .action-required { background-color: #dc3545; color: white; }
     .monitor { background-color: #17a2b8; color: white; }
     .chart-container { 
-        background-color: #f8f9fa; 
+        background-color: rgba(128, 128, 128, 0.1); 
         border-radius: 10px; 
         padding: 1.5rem; 
         box-shadow: 0 2px 8px rgba(0,0,0,0.1); 
-        border: 1px solid #dee2e6; 
+        border: 1px solid rgba(128, 128, 128, 0.2); 
     }
     .info-box { 
         background-color: rgba(0, 102, 204, 0.1); 
@@ -144,7 +118,6 @@ st.markdown("""
         margin: 1rem 0; 
     }
     .recommendation-box { 
-        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); 
         padding: 1.5rem; 
         border-radius: 10px; 
         border-left: 4px solid #0066cc; 
@@ -159,7 +132,6 @@ st.markdown("""
         display: inline-block; 
     }
     .filter-container { 
-        background-color: #e9ecef; 
         padding: 1rem; 
         border-radius: 10px; 
         margin-bottom: 2rem; 
