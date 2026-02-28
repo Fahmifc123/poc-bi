@@ -898,14 +898,13 @@ def main():
             if 'is_spike' in daily_metrics.columns:
                 spike_dates = daily_metrics[daily_metrics['is_spike']]['date'].tolist()
                 for spike_date in spike_dates:
-                    fig_sentiment.add_vrect(x0=spike_date - timedelta(hours=12), x1=spike_date + timedelta(hours=12),
-                                            fillcolor="rgba(255, 0, 0, 0.1)", layer="below", line_width=0)
-        else:
-            fig_sentiment.add_annotation(text="No data available", showarrow=False, font=dict(size=20))
+                    fig_emotion.add_vrect(x0=spike_date - timedelta(hours=12), x1=spike_date + timedelta(hours=12),
+                                         fillcolor="rgba(255, 0, 0, 0.1)", layer="below", line_width=0)
         
-        fig_sentiment.update_layout(margin=dict(l=20, r=20, t=30, b=20),
-                                    legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='center', x=0.5))
-        st.plotly_chart(fig_sentiment, use_container_width=True, config={'displayModeBar': False})
+        fig_emotion.update_layout(margin=dict(l=20, r=20, t=30, b=20),
+                                legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='center', x=0.5),
+                                yaxis_title='% of Total')
+        st.plotly_chart(fig_emotion, use_container_width=True, config={'displayModeBar': False})
         st.markdown("</div>", unsafe_allow_html=True)
     
     # Emotion distribution - Time series view (like Sentiment)
