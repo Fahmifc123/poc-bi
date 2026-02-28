@@ -491,30 +491,38 @@ def cluster_topics(df):
 # =============================================================================
 # RISK CALCULATION
 # =============================================================================
-def calculate_risk_metrics(daily_df, raw_df=None):
+def calculate_risk_metrics(daily_df, raw_df=None, source='Social Media'):
     """Calculate risk metrics with dynamic spike detection."""
     if daily_df.empty:
         return daily_df
-    
+
     # Dynamic spike detection: negative_ratio > mean + std
     mean_neg = daily_df['negative_ratio'].mean()
     std_neg = daily_df['negative_ratio'].std()
     threshold = mean_neg + std_neg if std_neg > 0 else mean_neg * 1.2
-    
+
     daily_df['is_spike'] = daily_df['negative_ratio'] > threshold
     daily_df['velocity'] = daily_df['volume'].pct_change().fillna(0).abs().clip(0, 1)
-    
+
+    # ONM: risk score dari sentiment saja
+    if source == 'Online Media':
+        daily_df['influencer_impact'] = 0.0
+        daily_df['misinformation_score'] = 0.0
+        daily_df['risk_score'] = daily_df['negative_ratio']
+        return daily_df
+
+    # Social Media / All: full formula
     # Deterministic misinformation score (reproducible)
     daily_df['misinformation_score'] = (
         daily_df['negative_ratio'] * daily_df['velocity']
     ).clip(0, 1)
-    
+
     # Calculate influencer impact from raw data if available
     # Uses followers count and engagement metrics
     if raw_df is not None and 'influencer_score' in raw_df.columns:
         # Group by date and calculate average influencer score per day
         daily_influencer = raw_df.groupby(raw_df['date'].dt.date)['influencer_score'].mean()
-        
+
         # Map to daily_df dates
         daily_df['date_normalized'] = daily_df['date'].dt.date
         daily_df['influencer_impact'] = daily_df['date_normalized'].map(daily_influencer).fillna(0.5)
@@ -522,7 +530,7 @@ def calculate_risk_metrics(daily_df, raw_df=None):
     else:
         # Fallback: use volume-based ranking
         daily_df['influencer_impact'] = daily_df['volume'].rank(pct=True)
-    
+
     daily_df['risk_score'] = (
         0.30 * daily_df['negative_ratio'] +      # Negative sentiment ratio (30%)
         0.25 * daily_df['velocity'] +            # Volume velocity/acceleration (25%)
@@ -802,7 +810,7 @@ def main():
         }).reset_index()
         daily_metrics.columns = ['date', 'volume', 'negative_ratio']
         # Pass raw df_data to calculate influencer impact from followers/engagement
-        daily_metrics = calculate_risk_metrics(daily_metrics, raw_df=df_data)
+        daily_metrics = calculate_risk_metrics(daily_metrics, raw_df=df_data, source=data_source)
         daily_metrics = smooth_timeseries(daily_metrics)
     else:
         # Create empty dataframe with required columns
@@ -863,7 +871,6 @@ def main():
     chart_col1, chart_col2 = st.columns(2)
     
     with chart_col1:
-        st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
         st.markdown("**Total Volume Over Time**")
         fig_volume = go.Figure()
         
@@ -882,10 +889,8 @@ def main():
         
         fig_volume.update_layout(margin=dict(l=20, r=20, t=30, b=20), showlegend=False)
         st.plotly_chart(fig_volume, use_container_width=True, config={'displayModeBar': False})
-        st.markdown("</div>", unsafe_allow_html=True)
-    
+
     with chart_col2:
-        st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
         st.markdown("**Negative vs Positive Sentiment Trend**")
         fig_sentiment = go.Figure()
         
@@ -913,13 +918,10 @@ def main():
         fig_sentiment.update_layout(margin=dict(l=20, r=20, t=30, b=20),
                                     legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='center', x=0.5))
         st.plotly_chart(fig_sentiment, use_container_width=True, config={'displayModeBar': False})
-        st.markdown("</div>", unsafe_allow_html=True)
     
     
     # Emotion distribution - Overall Bar Chart
     if data_source in ['Social Media', 'All'] and 'final_emotion' in df_filtered.columns:
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
         st.markdown("**Overall Emotion Distribution**")
         
         emotion_data = df_filtered[df_filtered['final_emotion'].notna()]
@@ -975,8 +977,6 @@ def main():
             if hidden_total > 0:
                 st.markdown(f"<small style='color: #6c757d;'>ℹ️ Neutral/No-Emotion: {hidden_total:,} ({hidden_pct:.1f}% of data) - Hidden for clarity</small>", unsafe_allow_html=True)
         
-        st.markdown("</div>", unsafe_allow_html=True)
-        
     
     # =============================================================================
     # SECTION 2 – TOPIC ANALYSIS (Using pre-computed final_topic from Colab)
@@ -1007,7 +1007,6 @@ def main():
             pie_col, metrics_col = st.columns([1.2, 1])
             
             with pie_col:
-                st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
                 st.markdown(f"**Top {top_n} Topics Distribution**")
                 colors = px.colors.qualitative.Set3[:len(topic_stats_display)]
                 fig_topics = go.Figure(data=[go.Pie(
@@ -1025,10 +1024,8 @@ def main():
                     legend=dict(orientation='v', x=1.02, y=0.5, font=dict(size=9))
                 )
                 st.plotly_chart(fig_topics, use_container_width=True, config={'displayModeBar': False})
-                st.markdown("</div>", unsafe_allow_html=True)
-            
+
             with metrics_col:
-                st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
                 st.markdown("**📊 Topic Metrics**")
                 
                 current_topic = selected_topic_detail if selected_topic_detail != 'All Topics' else topic_stats.iloc[0]['topic']
@@ -1090,8 +1087,6 @@ def main():
                     st.markdown("<span style='background-color: #ffc107; color: #1a1a2e; padding: 0.4rem 0.9rem; border-radius: 20px;'>Moderate Risk</span>", unsafe_allow_html=True)
                 else:
                     st.markdown("<span class='spike-normal'>✅ Low Risk</span>", unsafe_allow_html=True)
-                
-                st.markdown("</div>", unsafe_allow_html=True)
             
             st.session_state['current_topic'] = current_topic
             st.session_state['topic_negative_pct'] = topic_negative_pct
@@ -1155,15 +1150,21 @@ def main():
             
             # Calculate misinformation score
             topic_misinformation = topic_negative_ratio * topic_velocity
-            
-            # Calculate final risk score
-            topic_risk_score = (
-                0.30 * topic_negative_ratio +
-                0.25 * topic_velocity +
-                0.25 * topic_influencer_impact +
-                0.20 * topic_misinformation
-            )
-            
+
+            # ONM: risk score dari sentiment saja
+            if data_source == 'Online Media':
+                topic_risk_score = topic_negative_ratio
+                topic_influencer_impact = 0.0
+                topic_misinformation = 0.0
+            else:
+                # Social Media / All: full formula
+                topic_risk_score = (
+                    0.30 * topic_negative_ratio +
+                    0.25 * topic_velocity +
+                    0.25 * topic_influencer_impact +
+                    0.20 * topic_misinformation
+                )
+
             topic_risk_data = {
                 'negative_ratio': topic_negative_ratio,
                 'velocity': topic_velocity,
@@ -1212,7 +1213,6 @@ def main():
                     unsafe_allow_html=True)
     
     with col2:
-        st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
         st.markdown("**Risk Breakdown**")
         
         # Show source indicator
@@ -1227,17 +1227,23 @@ def main():
                 velocity = topic_risk_data['velocity']
                 influencer = topic_risk_data['influencer_impact']
                 misinfo = topic_risk_data['misinformation_score']
-                
-                # Calculate risk components with weighted scores
-                risk_components = [
-                    {"Component": "Negative Ratio", "Weight": "30%", "Value": f"{neg_ratio:.3f}", "Score": f"{neg_ratio * 0.30:.3f}"},
-                    {"Component": "Velocity", "Weight": "25%", "Value": f"{velocity:.3f}", "Score": f"{velocity * 0.25:.3f}"},
-                    {"Component": "Influencer Impact", "Weight": "25%", "Value": f"{influencer:.3f}", "Score": f"{influencer * 0.25:.3f}"},
-                    {"Component": "Misinformation Score", "Weight": "20%", "Value": f"{misinfo:.3f}", "Score": f"{misinfo * 0.20:.3f}"}
-                ]
+
+                # ONM: hanya tampilkan Negative Ratio
+                if data_source == 'Online Media':
+                    risk_components = [
+                        {"Component": "Negative Ratio (Sentiment)", "Weight": "100%", "Value": f"{neg_ratio:.3f}", "Score": f"{neg_ratio:.3f}"},
+                    ]
+                    st.caption("ℹ️ ONM: risk score dihitung dari sentiment saja")
+                else:
+                    risk_components = [
+                        {"Component": "Negative Ratio", "Weight": "30%", "Value": f"{neg_ratio:.3f}", "Score": f"{neg_ratio * 0.30:.3f}"},
+                        {"Component": "Velocity", "Weight": "25%", "Value": f"{velocity:.3f}", "Score": f"{velocity * 0.25:.3f}"},
+                        {"Component": "Influencer Impact", "Weight": "25%", "Value": f"{influencer:.3f}", "Score": f"{influencer * 0.25:.3f}"},
+                        {"Component": "Misinformation Score", "Weight": "20%", "Value": f"{misinfo:.3f}", "Score": f"{misinfo * 0.20:.3f}"}
+                    ]
+
                 risk_df = pd.DataFrame(risk_components)
-                
-                # Use simpler DataFrame display for better compatibility
+
                 st.dataframe(
                     risk_df,
                     use_container_width=True,
@@ -1249,12 +1255,12 @@ def main():
                         "Score": st.column_config.TextColumn("Weighted", width="small"),
                     }
                 )
-                
+
                 # Show risk score and data points
                 st.caption(f"📊 Risk Score: {topic_risk_data['risk_score']:.3f} | Data points: {topic_risk_data['total_data']:,}")
-                
-            except Exception as e:
-                st.error(f"Error displaying risk breakdown: {str(e)}")
+
+            except Exception as err:
+                st.error(f"Error displaying risk breakdown: {str(err)}")
                 # Show fallback table
                 risk_components = [
                     {"Component": "Negative Ratio", "Weight": "30%", "Value": "0.300", "Score": "0.090"},
@@ -1275,8 +1281,7 @@ def main():
             ]
             risk_df = pd.DataFrame(risk_components)
             st.table(risk_df)
-        st.markdown("</div>", unsafe_allow_html=True)
-    
+
     # =============================================================================
     # SECTION 5 – DECISION TRIGGER & RECOMMENDATION
     # =============================================================================
@@ -1301,7 +1306,6 @@ def main():
     col1, col2 = st.columns([1, 2])
     
     with col1:
-        st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
         st.markdown("**🎯 Topic Risk Assessment**")
         
         current_topic = st.session_state.get('current_topic', 'Unknown')
@@ -1321,7 +1325,7 @@ def main():
             st.markdown("<br><div class='decision-gate monitor'>✅ MONITOR</div>", unsafe_allow_html=True)
         
         # Two action buttons
-        st.markdown("<br>")
+        st.markdown("<br>", unsafe_allow_html=True)
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
             followup_clicked = st.button("📌 Follow-up as Issue", type="primary", use_container_width=True, key="followup_btn")
@@ -1334,17 +1338,13 @@ def main():
             generate_clicked = st.button("💡 Generate Recommendation", type="secondary", use_container_width=True, key="generate_btn")
             if generate_clicked:
                 st.session_state['show_recommendation'] = True
-        
-        st.markdown("</div>", unsafe_allow_html=True)
-    
+
     with col2:
-        st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
         st.markdown("**📋 Communication Strategy**")
         
         # Show recommendation only when Generate button is clicked
         if st.session_state.get('show_recommendation', False):
             if topic_risk == "High":
-                st.markdown("<div class='recommendation-box' style='margin-top: 1rem;'>", unsafe_allow_html=True)
                 st.markdown("**🔴 High Risk - Crisis Communication Protocol**")
                 st.markdown("**Channel:** Official Press Conference + Social Media Blitz")
                 st.markdown("**Tone:** Empathetic, Authoritative, Transparent")
@@ -1354,9 +1354,7 @@ def main():
                 st.markdown("• Present clear action plan with timeline")
                 st.markdown("• Deploy senior spokesperson for credibility")
                 st.markdown("• Monitor and respond to misinformation actively")
-                st.markdown("</div>", unsafe_allow_html=True)
             elif topic_risk == "Moderate":
-                st.markdown("<div class='recommendation-box' style='margin-top: 1rem;'>", unsafe_allow_html=True)
                 st.markdown("**🟡 Moderate Risk - Proactive Engagement Strategy**")
                 st.markdown("**Channel:** Social Media + Industry Webinar")
                 st.markdown("**Tone:** Informative, Reassuring, Professional")
@@ -1366,9 +1364,7 @@ def main():
                 st.markdown("• Engage key stakeholders in dialogue")
                 st.markdown("• Clarify misconceptions with factual data")
                 st.markdown("• Maintain consistent communication cadence")
-                st.markdown("</div>", unsafe_allow_html=True)
             else:
-                st.markdown("<div class='recommendation-box' style='margin-top: 1rem;'>", unsafe_allow_html=True)
                 st.markdown("**🟢 Low Risk - Maintenance & Monitoring**")
                 st.markdown("**Channel:** Regular Communication Channels")
                 st.markdown("**Tone:** Professional, Consistent")
@@ -1378,15 +1374,12 @@ def main():
                 st.markdown("• Monitor early warning signals")
                 st.markdown("• Maintain positive narrative momentum")
                 st.markdown("• Prepare contingency communications")
-                st.markdown("</div>", unsafe_allow_html=True)
         else:
             st.info("💡 Click 'Generate Recommendation' button to view communication strategy")
         
         # Show follow-up status if marked
         if st.session_state.get('followup_marked', False):
             st.markdown(f"<br><div class='info-box'><strong>📌 Follow-up Status:</strong> Topic '{st.session_state.get('followup_topic', current_topic)}' marked for BI issue tracking.</div>", unsafe_allow_html=True)
-        
-        st.markdown("</div>", unsafe_allow_html=True)
     
 
 if __name__ == "__main__":
