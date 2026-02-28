@@ -1084,23 +1084,35 @@ def main():
     with col2:
         st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
         st.markdown("**Risk Breakdown**")
-        if not daily_metrics.empty:
-            latest = daily_metrics.iloc[-1]
-            risk_components = [
-                {"Component": "Negative Ratio", "Weight": "30%", "Value": f"{latest['negative_ratio']:.3f}", "Score": f"{latest['negative_ratio'] * 0.30:.3f}"},
-                {"Component": "Velocity", "Weight": "25%", "Value": f"{latest['velocity']:.3f}", "Score": f"{latest['velocity'] * 0.25:.3f}"},
-                {"Component": "Influencer Impact", "Weight": "25%", "Value": f"{latest['influencer_impact']:.3f}", "Score": f"{latest['influencer_impact'] * 0.25:.3f}"},
-                {"Component": "Misinformation Score", "Weight": "20%", "Value": f"{latest['misinformation_score']:.3f}", "Score": f"{latest['misinformation_score'] * 0.20:.3f}"}
-            ]
-            risk_df = pd.DataFrame(risk_components)
-            fig_risk = go.Figure(data=[go.Table(
-                header=dict(values=['<b>Component</b>', '<b>Weight</b>', '<b>Value</b>', '<b>Weighted</b>'],
-                            fill_color='#0066cc', align='left', font=dict(color='white', size=11)),
-                cells=dict(values=[risk_df['Component'], risk_df['Weight'], risk_df['Value'], risk_df['Score']],
-                           fill_color=[['#f8f9fa', 'white'] * 3], align='left', font=dict(size=10))
-            )])
-            fig_risk.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=200)
-            st.plotly_chart(fig_risk, use_container_width=True)
+        if not daily_metrics.empty and len(daily_metrics) > 0:
+            try:
+                latest = daily_metrics.iloc[-1]
+                
+                # Check if columns exist before accessing
+                required_cols = ['negative_ratio', 'velocity', 'influencer_impact', 'misinformation_score']
+                if all(col in latest for col in required_cols):
+                    risk_components = [
+                        {"Component": "Negative Ratio", "Weight": "30%", "Value": f"{latest['negative_ratio']:.3f}", "Score": f"{latest['negative_ratio'] * 0.30:.3f}"},
+                        {"Component": "Velocity", "Weight": "25%", "Value": f"{latest['velocity']:.3f}", "Score": f"{latest['velocity'] * 0.25:.3f}"},
+                        {"Component": "Influencer Impact", "Weight": "25%", "Value": f"{latest['influencer_impact']:.3f}", "Score": f"{latest['influencer_impact'] * 0.25:.3f}"},
+                        {"Component": "Misinformation Score", "Weight": "20%", "Value": f"{latest['misinformation_score']:.3f}", "Score": f"{latest['misinformation_score'] * 0.20:.3f}"}
+                    ]
+                    risk_df = pd.DataFrame(risk_components)
+                    
+                    fig_risk = go.Figure(data=[go.Table(
+                        header=dict(values=['<b>Component</b>', '<b>Weight</b>', '<b>Value</b>', '<b>Weighted</b>'],
+                                    fill_color='#0066cc', align='left', font=dict(color='white', size=11)),
+                        cells=dict(values=[risk_df['Component'], risk_df['Weight'], risk_df['Value'], risk_df['Score']],
+                                   fill_color=[['#f8f9fa', 'white'] * 3], align='left', font=dict(size=10))
+                    )])
+                    fig_risk.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=220)
+                    st.plotly_chart(fig_risk, use_container_width=True, config={'displayModeBar': False})
+                else:
+                    st.info("Risk metrics not calculated yet")
+            except Exception as e:
+                st.error(f"Error displaying risk breakdown: {str(e)}")
+        else:
+            st.info("No risk data available")
         st.markdown("</div>", unsafe_allow_html=True)
     
     # =============================================================================
@@ -1128,25 +1140,38 @@ def main():
     
     with col1:
         st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
-        st.markdown("**Topic Risk Assessment**")
+        st.markdown("**🎯 Topic Risk Assessment**")
         
         current_topic = st.session_state.get('current_topic', 'Unknown')
-        st.markdown(f"**Topic:** <span class='topic-tag'>{current_topic}</span>", unsafe_allow_html=True)
+        st.markdown(f"<span style='font-size: 0.9rem;'><strong>Topic:</strong> <span class='topic-tag'>{current_topic}</span></span>", unsafe_allow_html=True)
         
         # Show combined risk breakdown
         if 'topic_emotion_risk' in st.session_state:
             emotion_risk_display = st.session_state['topic_emotion_risk']
             st.markdown(f"<small style='color: #6c757d;'>Sentiment Risk: {topic_negative_pct:.1f}% | Emotion Risk: {emotion_risk_display:.1f}/100</small>", unsafe_allow_html=True)
         
+        # Risk status without explanatory text
         if topic_risk == "High":
             st.markdown("<br><div class='decision-gate action-required'>⚠️ ACTION REQUIRED</div>", unsafe_allow_html=True)
-            st.markdown("<br>Topic shows high negative sentiment and/or emotional intensity. Immediate intervention recommended.")
         elif topic_risk == "Moderate":
             st.markdown("<br><div class='decision-gate monitor' style='background-color: #ffc107; color: #1a1a2e;'>MONITOR & ACT</div>", unsafe_allow_html=True)
-            st.markdown("<br>Topic shows moderate concern or mixed emotions. Proactive engagement advised.")
         else:
             st.markdown("<br><div class='decision-gate monitor'>✅ MONITOR</div>", unsafe_allow_html=True)
-            st.markdown("<br>Topic sentiment is healthy. Continue monitoring.")
+        
+        # Two action buttons
+        st.markdown("<br>")
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            followup_clicked = st.button("📌 Follow-up as Issue", type="primary", use_container_width=True, key="followup_btn")
+            if followup_clicked:
+                st.success("✅ Topic marked for follow-up as high-impact issue")
+                st.session_state['followup_marked'] = True
+                st.session_state['followup_topic'] = current_topic
+        
+        with col_btn2:
+            generate_clicked = st.button("💡 Generate Recommendation", type="secondary", use_container_width=True, key="generate_btn")
+            if generate_clicked:
+                st.session_state['show_recommendation'] = True
         
         st.markdown("</div>", unsafe_allow_html=True)
     
@@ -1154,43 +1179,50 @@ def main():
         st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
         st.markdown("**📋 Communication Strategy**")
         
-        # Show recommendation based on risk level (no button needed)
-        if topic_risk == "High":
-            st.markdown("<div class='recommendation-box' style='margin-top: 1rem;'>", unsafe_allow_html=True)
-            st.markdown("**🔴 High Risk - Crisis Communication Protocol**")
-            st.markdown("**Channel:** Official Press Conference + Social Media Blitz")
-            st.markdown("**Tone:** Empathetic, Authoritative, Transparent")
-            st.markdown("**Target Stakeholder:** General Public, Media, Financial Markets")
-            st.markdown("**Key Messaging Points:**")
-            st.markdown("• Acknowledge concerns and provide reassurance")
-            st.markdown("• Present clear action plan with timeline")
-            st.markdown("• Deploy senior spokesperson for credibility")
-            st.markdown("• Monitor and respond to misinformation actively")
-            st.markdown("</div>", unsafe_allow_html=True)
-        elif topic_risk == "Moderate":
-            st.markdown("<div class='recommendation-box' style='margin-top: 1rem;'>", unsafe_allow_html=True)
-            st.markdown("**🟡 Moderate Risk - Proactive Engagement Strategy**")
-            st.markdown("**Channel:** Social Media + Industry Webinar")
-            st.markdown("**Tone:** Informative, Reassuring, Professional")
-            st.markdown("**Target Stakeholder:** Banking Community, Policy Makers")
-            st.markdown("**Key Messaging Points:**")
-            st.markdown("• Increase transparency through educational content")
-            st.markdown("• Engage key stakeholders in dialogue")
-            st.markdown("• Clarify misconceptions with factual data")
-            st.markdown("• Maintain consistent communication cadence")
-            st.markdown("</div>", unsafe_allow_html=True)
+        # Show recommendation only when Generate button is clicked
+        if st.session_state.get('show_recommendation', False):
+            if topic_risk == "High":
+                st.markdown("<div class='recommendation-box' style='margin-top: 1rem;'>", unsafe_allow_html=True)
+                st.markdown("**🔴 High Risk - Crisis Communication Protocol**")
+                st.markdown("**Channel:** Official Press Conference + Social Media Blitz")
+                st.markdown("**Tone:** Empathetic, Authoritative, Transparent")
+                st.markdown("**Target Stakeholder:** General Public, Media, Financial Markets")
+                st.markdown("**Key Messaging Points:**")
+                st.markdown("• Acknowledge concerns and provide reassurance")
+                st.markdown("• Present clear action plan with timeline")
+                st.markdown("• Deploy senior spokesperson for credibility")
+                st.markdown("• Monitor and respond to misinformation actively")
+                st.markdown("</div>", unsafe_allow_html=True)
+            elif topic_risk == "Moderate":
+                st.markdown("<div class='recommendation-box' style='margin-top: 1rem;'>", unsafe_allow_html=True)
+                st.markdown("**🟡 Moderate Risk - Proactive Engagement Strategy**")
+                st.markdown("**Channel:** Social Media + Industry Webinar")
+                st.markdown("**Tone:** Informative, Reassuring, Professional")
+                st.markdown("**Target Stakeholder:** Banking Community, Policy Makers")
+                st.markdown("**Key Messaging Points:**")
+                st.markdown("• Increase transparency through educational content")
+                st.markdown("• Engage key stakeholders in dialogue")
+                st.markdown("• Clarify misconceptions with factual data")
+                st.markdown("• Maintain consistent communication cadence")
+                st.markdown("</div>", unsafe_allow_html=True)
+            else:
+                st.markdown("<div class='recommendation-box' style='margin-top: 1rem;'>", unsafe_allow_html=True)
+                st.markdown("**🟢 Low Risk - Maintenance & Monitoring**")
+                st.markdown("**Channel:** Regular Communication Channels")
+                st.markdown("**Tone:** Professional, Consistent")
+                st.markdown("**Target Stakeholder:** All Stakeholders")
+                st.markdown("**Key Messaging Points:**")
+                st.markdown("• Continue regular information dissemination")
+                st.markdown("• Monitor early warning signals")
+                st.markdown("• Maintain positive narrative momentum")
+                st.markdown("• Prepare contingency communications")
+                st.markdown("</div>", unsafe_allow_html=True)
         else:
-            st.markdown("<div class='recommendation-box' style='margin-top: 1rem;'>", unsafe_allow_html=True)
-            st.markdown("**🟢 Low Risk - Maintenance & Monitoring**")
-            st.markdown("**Channel:** Regular Communication Channels")
-            st.markdown("**Tone:** Professional, Consistent")
-            st.markdown("**Target Stakeholder:** All Stakeholders")
-            st.markdown("**Key Messaging Points:**")
-            st.markdown("• Continue regular information dissemination")
-            st.markdown("• Monitor early warning signals")
-            st.markdown("• Maintain positive narrative momentum")
-            st.markdown("• Prepare contingency communications")
-            st.markdown("</div>", unsafe_allow_html=True)
+            st.info("💡 Click 'Generate Recommendation' button to view communication strategy")
+        
+        # Show follow-up status if marked
+        if st.session_state.get('followup_marked', False):
+            st.markdown(f"<br><div class='info-box'><strong>📌 Follow-up Status:</strong> Topic '{st.session_state.get('followup_topic', current_topic)}' marked for BI issue tracking.</div>", unsafe_allow_html=True)
         
         st.markdown("</div>", unsafe_allow_html=True)
     
