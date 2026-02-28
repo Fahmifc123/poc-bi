@@ -158,6 +158,15 @@ def detect_separator(filepath, sample_lines=5):
         except Exception:
             return ','  # default fallback
 
+def _normalize_sentiment(series):
+    """Normalize sentiment values to lowercase alpha-only strings."""
+    return (
+        series.astype(str)
+        .str.lower()
+        .str.strip()
+        .str.replace(r"[^a-z]", "", regex=True)
+    )
+
 @st.cache_data(ttl=3600)
 def load_data():
     """Load and combine social media and online news media datasets."""
@@ -251,14 +260,7 @@ def load_data():
             df_sosmed['final_sentiment'] = 'neutral'
         
         # Normalize sentiment values
-        def normalize_sentiment(series):
-            return (
-                series.astype(str)
-                .str.lower()
-                .str.strip()
-                .str.replace(r"[^a-z]", "", regex=True)
-            )
-        df_sosmed['final_sentiment'] = normalize_sentiment(df_sosmed['final_sentiment'])
+        df_sosmed['final_sentiment'] = _normalize_sentiment(df_sosmed['final_sentiment'])
         
         df_sosmed = df_sosmed.dropna(subset=['date'])
     except FileNotFoundError:
@@ -290,17 +292,28 @@ def load_data():
                 df_onm['date'] = pd.to_datetime(df_onm[date_col_onm], format='%Y-%m-%d %H:%M:%S', errors='coerce')
             if df_onm['date'].isna().all():
                 df_onm['date'] = pd.to_datetime(df_onm[date_col_onm], errors='coerce')
-        # Map sentiment
+        # Map sentiment - bug fix: always normalize regardless of parquet/CSV source
         if 'final_sentiment' not in df_onm.columns:
             if 'sentiment' in df_onm.columns:
-                df_onm['final_sentiment'] = df_onm['sentiment'].astype(str).str.lstrip("'").str.lower().str.strip()
+                df_onm['final_sentiment'] = df_onm['sentiment']
             else:
                 df_onm['final_sentiment'] = 'neutral'
-        # Map content column
-        if 'content' not in df_onm.columns and 'body' in df_onm.columns:
-            df_onm['content'] = df_onm['body']
+        # Always apply normalization (parquet may have stale/un-normalized values)
+        df_onm['final_sentiment'] = _normalize_sentiment(df_onm['final_sentiment'])
+        # Map content column - bug fix: support more column name variations
+        if 'content' not in df_onm.columns:
+            for _col in ['body', 'title', 'headline', 'article', 'text', 'full_text']:
+                if _col in df_onm.columns:
+                    df_onm['content'] = df_onm[_col]
+                    break
+            else:
+                df_onm['content'] = 'no_content'
+        # Map final_topic - bug fix: check 'topic' column same as sosmed
         if 'final_topic' not in df_onm.columns:
-            df_onm['final_topic'] = 'Unknown'
+            if 'topic' in df_onm.columns:
+                df_onm['final_topic'] = df_onm['topic']
+            else:
+                df_onm['final_topic'] = 'Unknown'
         df_onm = df_onm.dropna(subset=['date'])
     except FileNotFoundError:
         pass
@@ -804,10 +817,12 @@ def main():
     if not df_data.empty and 'date' in df_data.columns:
         # Use external series so we don't modify df_data in-place
         _date_only = df_data['date'].dt.floor('D')
-        daily_metrics = df_data.groupby(_date_only).agg({
-            'content': 'count',
-            'final_sentiment': lambda x: (x == 'negative').mean()
-        }).reset_index()
+        # Bug fix: use 'size' for volume count so it doesn't depend on 'content' column
+        daily_volume = df_data.groupby(_date_only).size().rename('volume')
+        daily_neg = df_data.groupby(_date_only)['final_sentiment'].apply(
+            lambda x: (x == 'negative').mean()
+        ).rename('negative_ratio')
+        daily_metrics = pd.concat([daily_volume, daily_neg], axis=1).reset_index()
         daily_metrics.columns = ['date', 'volume', 'negative_ratio']
         # Pass raw df_data to calculate influencer impact from followers/engagement
         daily_metrics = calculate_risk_metrics(daily_metrics, raw_df=df_data, source=data_source)
