@@ -694,7 +694,7 @@ def main():
     filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 2])
     
     with filter_col1:
-        data_source = st.selectbox("Data Source", options=['Social Media', 'Online Media', 'All'], index=0)
+        data_source = st.selectbox("Data Source", options=['Social Media', 'Online Media', 'All'], index=0, key="data_source_sel")
     
     with filter_col2:
         # Safe date range calculation
@@ -715,8 +715,16 @@ def main():
             min_date = datetime(2024, 1, 1).date()
             max_date = datetime(2024, 1, 31).date()
         
-        date_range = st.date_input("Date Range", value=(min_date, min(min_date + timedelta(days=30), max_date)), 
-                                   min_value=min_date, max_value=max_date)
+        # Initialize session state for filters if not exists
+        if 'filter_date_range' not in st.session_state:
+            st.session_state.filter_date_range = (min_date, min(min_date + timedelta(days=30), max_date))
+        
+        date_range = st.date_input("Date Range", value=st.session_state.filter_date_range, 
+                                   min_value=min_date, max_value=max_date, key="date_range_input")
+        
+        # Only update session state when user actually changes the value
+        if date_range != st.session_state.get('filter_date_range'):
+            st.session_state.filter_date_range = date_range
     
     with filter_col3:
         # Topic filter - will be populated after data load
@@ -733,7 +741,20 @@ def main():
                 all_topics.update(df_onm['final_topic'].dropna().unique())
             topic_options.extend(sorted(all_topics))
         
-        selected_topic = st.selectbox("Filter by Topic", options=topic_options, index=0)
+        # Initialize session state for topic if not exists
+        if 'filter_topic' not in st.session_state:
+            st.session_state.filter_topic = 'All Topics'
+        
+        selected_topic = st.selectbox("Filter by Topic", options=topic_options, index=0, key="topic_select")
+        
+        # Only update session state when user actually changes the value
+        if selected_topic != st.session_state.get('filter_topic'):
+            st.session_state.filter_topic = selected_topic
+    
+    # Use session state values for filtering (prevents constant reloading)
+    data_source = st.session_state.get("data_source_sel", 'Social Media')
+    date_range = st.session_state.get("filter_date_range", (min_date, min_date + timedelta(days=30)))
+    selected_topic = st.session_state.get("filter_topic", 'All Topics')
     
     # Apply filters — no unnecessary copies to save memory
     if data_source == 'Social Media':
@@ -752,6 +773,9 @@ def main():
             (df_filtered['date'].dt.date >= date_range[0]) &
             (df_filtered['date'].dt.date <= date_range[1])
         ]
+    
+    # Show filter status with cache info
+    st.caption(f"✓ Filters cached | Data Source: {data_source} | Topic: {selected_topic} | Date: {date_range[0]} to {date_range[1]}")
 
     # Use all filtered data (no BI mention filter)
     df_data = df_filtered
@@ -841,36 +865,50 @@ def main():
                     f"<div style='margin-top: 10px;'><span class='risk-badge {risk_class}'>{risk_level}</span></div></div>", 
                     unsafe_allow_html=True)
     
+    st.markdown("<br>", unsafe_allow_html=True)
     
-    # Emotion distribution - Time series view
-    if data_source in ['Social Media', 'All'] and 'final_emotion' in df_filtered.columns:
-        st.markdown("<br>", unsafe_allow_html=True)
+    chart_col1, chart_col2 = st.columns(2)
+    
+    with chart_col1:
         st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
-        st.markdown("**Emotion Distribution**")
-        emotion_data = df_filtered[df_filtered['final_emotion'].notna()]
-        if not emotion_data.empty:
-            # Group by date and emotion for timeseries
-            daily_emotion = emotion_data.groupby(['date', 'final_emotion']).size().reset_index(name='count')
-            emotion_pivot = daily_emotion.pivot(index='date', columns='final_emotion', values='count').fillna(0)
-            emotion_pivot_pct = emotion_pivot.div(emotion_pivot.sum(axis=1), axis=0) * 100
-            
-            # Get emotions present (exclude neutral/no-emotion)
-            emotions_present = [col for col in emotion_pivot.columns if col.lower() not in ['neutral', 'no-emotion', 'noemotion']]
-            
-            fig_emotion = go.Figure()
-            emotion_colors = {'joy': '#28a745', 'trust': '#0066cc', 'fear': '#ffc107', 'anger': '#dc3545'}
-            
-            for emotion in emotions_present:
-                if emotion in emotion_pivot_pct.columns:
-                    fig_emotion.add_trace(go.Scatter(
-                        x=emotion_pivot_pct.index, 
-                        y=emotion_pivot_pct[emotion],
-                        mode='lines',
-                        name=emotion.capitalize(),
-                        line=dict(color=emotion_colors.get(emotion, '#6c757d'), width=2)
-                    ))
-            
-            # Add spike overlays
+        st.markdown("**Total Volume Over Time**")
+        fig_volume = go.Figure()
+        
+        if not daily_metrics.empty and 'date' in daily_metrics.columns:
+            # Use smoothed volume
+            y_volume = daily_metrics['volume_smooth'] if 'volume_smooth' in daily_metrics.columns else daily_metrics['volume']
+            fig_volume.add_trace(go.Scatter(x=daily_metrics['date'], y=y_volume, mode='lines',
+                                            line=dict(color='#0066cc', width=2), fill='tozeroy', fillcolor='rgba(0, 102, 204, 0.1)'))
+            if 'is_spike' in daily_metrics.columns:
+                spike_dates = daily_metrics[daily_metrics['is_spike']]['date'].tolist()
+                for spike_date in spike_dates:
+                    fig_volume.add_vrect(x0=spike_date - timedelta(hours=12), x1=spike_date + timedelta(hours=12),
+                                         fillcolor="rgba(255, 0, 0, 0.2)", layer="below", line_width=0)
+        else:
+            fig_volume.add_annotation(text="No data available", showarrow=False, font=dict(size=20))
+        
+        fig_volume.update_layout(margin=dict(l=20, r=20, t=30, b=20), showlegend=False)
+        st.plotly_chart(fig_volume, use_container_width=True, config={'displayModeBar': False})
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    with chart_col2:
+        st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
+        st.markdown("**Negative vs Positive Sentiment Trend**")
+        fig_sentiment = go.Figure()
+        
+        if not daily_metrics.empty and 'date' in daily_metrics.columns:
+            # Use smoothed sentiment ratios
+            if 'positive_ratio_smooth' in daily_metrics.columns and 'negative_ratio_smooth' in daily_metrics.columns:
+                fig_sentiment.add_trace(go.Scatter(x=daily_metrics['date'], y=daily_metrics['positive_ratio_smooth'] * 100,
+                                                   mode='lines', name='Positive', line=dict(color='#28a745', width=2)))
+                fig_sentiment.add_trace(go.Scatter(x=daily_metrics['date'], y=daily_metrics['negative_ratio_smooth'] * 100,
+                                                   mode='lines', name='Negative', line=dict(color='#dc3545', width=2, dash='dash')))
+            else:
+                # Fallback to raw ratios
+                fig_sentiment.add_trace(go.Scatter(x=daily_metrics['date'], y=(1 - daily_metrics['negative_ratio']) * 100,
+                                                   mode='lines', name='Positive', line=dict(color='#28a745', width=2)))
+                fig_sentiment.add_trace(go.Scatter(x=daily_metrics['date'], y=daily_metrics['negative_ratio'] * 100,
+                                                   mode='lines', name='Negative', line=dict(color='#dc3545', width=2, dash='dash')))
             if 'is_spike' in daily_metrics.columns:
                 spike_dates = daily_metrics[daily_metrics['is_spike']]['date'].tolist()
                 for spike_date in spike_dates:
@@ -883,7 +921,6 @@ def main():
                                     legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='center', x=0.5))
         st.plotly_chart(fig_sentiment, use_container_width=True, config={'displayModeBar': False})
         st.markdown("</div>", unsafe_allow_html=True)
-    
     # Emotion distribution - Time series view (like Sentiment)
     if data_source in ['Social Media', 'All'] and 'final_emotion' in df_filtered.columns:
         st.markdown("**Emotion Trend Over Time**")
