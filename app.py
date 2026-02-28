@@ -842,31 +842,6 @@ def main():
                     unsafe_allow_html=True)
     
     
-    # Emotion distribution
-    if data_source in ['Social Media', 'All'] and 'final_emotion' in df_filtered.columns:
-        st.markdown("**Emotion Distribution**")
-        emotion_data = df_filtered[df_filtered['final_emotion'].notna()]
-        if not emotion_data.empty:
-            emotion_counts = emotion_data['final_emotion'].value_counts()
-            no_emotion_mask = emotion_counts.index.str.lower().str.replace('-', '').str.replace(' ', '') == 'noemotion'
-            no_emotion_count = int(emotion_counts[no_emotion_mask].sum())
-            no_emotion_pct = no_emotion_count / len(emotion_data) * 100
-            emotion_counts_filtered = emotion_counts[~no_emotion_mask]
-            emotion_colors = {
-                'joy': '#28a745', 'trust': '#0066cc', 'fear': '#ffc107', 'anger': '#dc3545',
-                'neutral': '#6c757d', 'proud': '#9b59b6', 'sadness': '#95a5a6', 'surprised': '#17a2b8'
-            }
-            fig_emotion = go.Figure(data=[go.Bar(
-                x=emotion_counts_filtered.index.str.upper(),
-                y=emotion_counts_filtered.values,
-                marker_color=[emotion_colors.get(e.lower(), '#6c757d') for e in emotion_counts_filtered.index]
-            )])
-            fig_emotion.update_layout(margin=dict(l=20, r=20, t=20, b=20), showlegend=False)
-            st.plotly_chart(fig_emotion, use_container_width=True, config={'displayModeBar': False})
-            if no_emotion_count > 0:
-                st.markdown(f"<small style='color: #6c757d;'>No-Emotion: {no_emotion_count:,} ({no_emotion_pct:.1f}% dari data)</small>", unsafe_allow_html=True)
-        
-    
     # =============================================================================
     # SECTION 2 – TOPIC ANALYSIS (Using pre-computed final_topic from Colab)
     # =============================================================================
@@ -988,7 +963,31 @@ def main():
             st.session_state['topic_emotion_risk'] = (anger_pct * 0.50 + fear_pct * 0.30 - joy_pct * 0.20 - trust_pct * 0.10)
     else:
         st.info("No topic data available. Please ensure 'final_topic' column exists from Colab clustering.")
-    
+
+    # Emotion distribution (below Topic Analysis)
+    if data_source in ['Social Media', 'All'] and 'final_emotion' in df_filtered.columns:
+        st.markdown("**Emotion Distribution**")
+        emotion_data = df_filtered[df_filtered['final_emotion'].notna()]
+        if not emotion_data.empty:
+            emotion_counts = emotion_data['final_emotion'].value_counts()
+            no_emotion_mask = emotion_counts.index.str.lower().str.replace('-', '').str.replace(' ', '') == 'noemotion'
+            no_emotion_count = int(emotion_counts[no_emotion_mask].sum())
+            no_emotion_pct = no_emotion_count / len(emotion_data) * 100
+            emotion_counts_filtered = emotion_counts[~no_emotion_mask]
+            emotion_colors = {
+                'joy': '#28a745', 'trust': '#0066cc', 'fear': '#ffc107', 'anger': '#dc3545',
+                'neutral': '#6c757d', 'proud': '#9b59b6', 'sadness': '#95a5a6', 'surprised': '#17a2b8'
+            }
+            fig_emotion = go.Figure(data=[go.Bar(
+                x=emotion_counts_filtered.index.str.upper(),
+                y=emotion_counts_filtered.values,
+                marker_color=[emotion_colors.get(e.lower(), '#6c757d') for e in emotion_counts_filtered.index]
+            )])
+            fig_emotion.update_layout(margin=dict(l=20, r=20, t=20, b=20), showlegend=False)
+            st.plotly_chart(fig_emotion, use_container_width=True, config={'displayModeBar': False})
+            if no_emotion_count > 0:
+                st.markdown(f"<small style='color: #6c757d;'>No-Emotion: {no_emotion_count:,} ({no_emotion_pct:.1f}% dari data)</small>", unsafe_allow_html=True)
+
     # =============================================================================
     # SECTION 4 – SPIKE & RISK ENGINE
     # =============================================================================
