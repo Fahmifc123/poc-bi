@@ -288,7 +288,15 @@ def load_data():
             df_sosmed = df_dummy_sosmed
         if df_onm is None:
             df_onm = df_dummy_onm
-    
+
+    # Memory optimization: convert low-cardinality string columns to category
+    # Saves ~60-80% memory for sentiment/topic/emotion columns (100k rows)
+    for _df in [df_sosmed, df_onm]:
+        if _df is not None:
+            for _col in ['final_sentiment', 'final_topic', 'final_emotion', 'source']:
+                if _col in _df.columns:
+                    _df[_col] = _df[_col].astype('category')
+
     return df_sosmed, df_onm
 
 def generate_dummy_data():
@@ -682,24 +690,26 @@ def main():
         
         selected_topic = st.selectbox("Filter by Topic", options=topic_options, index=0)
     
-    # Apply filters
+    # Apply filters — no unnecessary copies to save memory
     if data_source == 'Social Media':
-        df_filtered = df_sosmed.copy()
+        df_filtered = df_sosmed
     elif data_source == 'Online Media':
-        df_filtered = df_onm.copy()
+        df_filtered = df_onm
     else:
         df_filtered = pd.concat([df_sosmed, df_onm], ignore_index=True)
-    
+
     # Filter by topic
     if selected_topic != 'All Topics' and 'final_topic' in df_filtered.columns:
-        df_filtered = df_filtered[df_filtered['final_topic'] == selected_topic].copy()
-    
+        df_filtered = df_filtered[df_filtered['final_topic'] == selected_topic]
+
     if len(date_range) == 2:
-        df_filtered = df_filtered[(df_filtered['date'].dt.date >= date_range[0]) & 
-                                  (df_filtered['date'].dt.date <= date_range[1])].copy()
-    
+        df_filtered = df_filtered[
+            (df_filtered['date'].dt.date >= date_range[0]) &
+            (df_filtered['date'].dt.date <= date_range[1])
+        ]
+
     # Use all filtered data (no BI mention filter)
-    df_data = df_filtered.copy()
+    df_data = df_filtered
     
     # Ensure final_sentiment exists (check 'sentiment' column from CSV)
     if 'sentiment' in df_data.columns and 'final_sentiment' not in df_data.columns:
@@ -721,9 +731,9 @@ def main():
     
     # Daily aggregation - group by date only (not datetime)
     if not df_data.empty and 'date' in df_data.columns:
-        # Create date-only column for grouping (fast method)
-        df_data['date_only'] = df_data['date'].dt.floor('D')
-        daily_metrics = df_data.groupby('date_only').agg({
+        # Use external series so we don't modify df_data in-place
+        _date_only = df_data['date'].dt.floor('D')
+        daily_metrics = df_data.groupby(_date_only).agg({
             'content': 'count',
             'final_sentiment': lambda x: (x == 'negative').mean()
         }).reset_index()
