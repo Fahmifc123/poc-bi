@@ -896,15 +896,46 @@ def main():
         st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
         st.markdown("**Emotion Trend Over Time**")
         
-        # Aggregate emotion by date
+        # Aggregate emotion by date - TIME SERIES view
         emotion_data = df_filtered[df_filtered['final_emotion'].notna()]
         if not emotion_data.empty:
-            emotion_counts = emotion_data['final_emotion'].value_counts()
-            emotion_colors = {'joy': '#28a745', 'trust': '#0066cc', 'fear': '#ffc107', 'anger': '#dc3545', 'neutral': '#6c757d'}
-            fig_emotion = go.Figure(data=[go.Bar(x=emotion_counts.index.str.upper(), y=emotion_counts.values,
-                                                 marker_color=[emotion_colors.get(e, '#6c757d') for e in emotion_counts.index])])
-            fig_emotion.update_layout(margin=dict(l=20, r=20, t=20, b=20), showlegend=False)
-            st.plotly_chart(fig_emotion, use_container_width=True)
+            # Group by date and emotion for timeseries
+            daily_emotion = emotion_data.groupby(['date', 'final_emotion']).size().reset_index(name='count')
+            emotion_pivot = daily_emotion.pivot(index='date', columns='final_emotion', values='count').fillna(0)
+            emotion_pivot_pct = emotion_pivot.div(emotion_pivot.sum(axis=1), axis=0) * 100
+            
+            # Get emotions present (exclude neutral/no-emotion)
+            emotions_present = [col for col in emotion_pivot.columns if col.lower() not in ['neutral', 'no-emotion', 'noemotion']]
+            
+            fig_emotion = go.Figure()
+            emotion_colors = {'joy': '#28a745', 'trust': '#0066cc', 'fear': '#ffc107', 'anger': '#dc3545'}
+            
+            for emotion in emotions_present:
+                if emotion in emotion_pivot_pct.columns:
+                    fig_emotion.add_trace(go.Scatter(
+                        x=emotion_pivot_pct.index, 
+                        y=emotion_pivot_pct[emotion],
+                        mode='lines',
+                        name=emotion.capitalize(),
+                        line=dict(color=emotion_colors.get(emotion, '#6c757d'), width=2)
+                    ))
+            
+            # Add spike overlays
+            if 'is_spike' in daily_metrics.columns:
+                for spike_date in daily_metrics[daily_metrics['is_spike']]['date'].tolist():
+                    fig_emotion.add_vrect(x0=spike_date - timedelta(hours=12), x1=spike_date + timedelta(hours=12),
+                                         fillcolor="rgba(255, 0, 0, 0.1)", layer="below", line_width=0)
+            
+            fig_emotion.update_layout(margin=dict(l=20, r=20, t=30, b=20),
+                                    legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='center', x=0.5),
+                                    yaxis_title='% of Total')
+            st.plotly_chart(fig_emotion, use_container_width=True, config={'displayModeBar': False})
+            
+            # No-emotion info below chart
+            no_emotion_count = df_filtered[(df_filtered['final_emotion'].isna()) | (df_filtered['final_emotion'].astype(str).str.lower().isin(['neutral', 'no-emotion', 'noemotion']))].shape[0]
+            no_emotion_pct = (no_emotion_count / len(df_filtered) * 100) if len(df_filtered) > 0 else 0
+            st.markdown(f"<small style='color: #6c757d;'>ℹ️ Neutral/No-Emotion: {no_emotion_count:,} ({no_emotion_pct:.1f}% of data) - Hidden for clarity</small>", unsafe_allow_html=True)
+        
         st.markdown("</div>", unsafe_allow_html=True)
     
     # =============================================================================
@@ -932,12 +963,12 @@ def main():
         st.markdown(f"**Total Topics:** {len(topic_stats):,} | **Showing Top {min(top_n, len(topic_stats))} in Chart**")
         
         if not topic_stats.empty:
-            col1, col2 = st.columns(2)
+            # Single row layout: Pie chart (left) + Topic metrics (right)
+            pie_col, metrics_col = st.columns([1.2, 1])
             
-            with col1:
+            with pie_col:
                 st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
                 st.markdown(f"**Top {top_n} Topics Distribution**")
-                # Pie chart for topics with % labels and legend
                 colors = px.colors.qualitative.Set3[:len(topic_stats_display)]
                 fig_topics = go.Figure(data=[go.Pie(
                     labels=topic_stats_display['topic'],
@@ -954,116 +985,78 @@ def main():
                     legend=dict(orientation='v', x=1.02, y=0.5, font=dict(size=9))
                 )
                 st.plotly_chart(fig_topics, use_container_width=True, config={'displayModeBar': False})
-                
                 st.markdown("</div>", unsafe_allow_html=True)
             
-            with col2:
+            with metrics_col:
                 st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
-                st.markdown("**Topic Sentiment Distribution**")
+                st.markdown("**📊 Topic Metrics**")
                 
-                # Get selected topic from dropdown or pie click
-                clicked_topic = st.session_state.get('clicked_topic')
-                if clicked_topic and clicked_topic in topic_stats['topic'].values:
-                    current_topic = clicked_topic
-                    topic_data = topic_stats[topic_stats['topic'] == clicked_topic]
-                    # Reset clicked topic after use
-                    st.session_state['clicked_topic'] = None
-                elif selected_topic_detail != 'All Topics':
-                    current_topic = selected_topic_detail
-                    topic_data = topic_stats[topic_stats['topic'] == selected_topic_detail]
-                else:
-                    current_topic = topic_stats.iloc[0]['topic']
-                    topic_data = topic_stats.iloc[0:1]
+                current_topic = selected_topic_detail if selected_topic_detail != 'All Topics' else topic_stats.iloc[0]['topic']
+                topic_data = topic_stats[topic_stats['topic'] == current_topic] if selected_topic_detail != 'All Topics' else topic_stats.iloc[0:1]
                 
-                st.markdown(f"**Selected Topic:** <span class='topic-tag'>{current_topic}</span>", 
-                           unsafe_allow_html=True)
+                st.markdown(f"<span style='font-size: 0.9rem;'><strong>Selected:</strong> <span class='topic-tag'>{current_topic}</span></span>", unsafe_allow_html=True)
                 
-                # Calculate topic metrics
-                topic_negative_pct = topic_data['negative_ratio'].values[0] * 100 if not topic_data.empty else 0
                 topic_volume = topic_data['volume'].values[0] if not topic_data.empty else 0
+                topic_negative_pct = topic_data['negative_ratio'].values[0] * 100 if not topic_data.empty else 0
                 
-                st.markdown(f"<br>**Total Data:** {topic_volume:,}", unsafe_allow_html=True)
-                st.markdown(f"**Negative Sentiment:** {topic_negative_pct:.1f}%", unsafe_allow_html=True)
-                
-                # Topic Emotion Analysis & Risk Calculation
+                anger_pct, fear_pct, joy_pct, trust_pct = 0, 0, 0, 0
                 if 'final_emotion' in df_filtered.columns:
                     topic_emotions = df_filtered[
                         (df_filtered['final_topic'] == current_topic) & 
                         (df_filtered['final_emotion'].notna()) &
                         (df_filtered['final_emotion'] != 'neutral')
                     ]
-                    
                     if not topic_emotions.empty:
                         emotion_counts = topic_emotions['final_emotion'].value_counts()
                         total_emotion = emotion_counts.sum()
-                        
-                        # Calculate emotion percentages
                         anger_pct = (emotion_counts.get('anger', 0) / total_emotion * 100) if total_emotion > 0 else 0
                         fear_pct = (emotion_counts.get('fear', 0) / total_emotion * 100) if total_emotion > 0 else 0
-                        
-                        # Emotion-based risk score for topic
-                        # Formula: (anger% * 0.5) + (fear% * 0.3) + (joy% * -0.2)
                         joy_pct = (emotion_counts.get('joy', 0) / total_emotion * 100) if total_emotion > 0 else 0
                         trust_pct = (emotion_counts.get('trust', 0) / total_emotion * 100) if total_emotion > 0 else 0
-                        
-                        emotion_risk_score = (
-                            (anger_pct * 0.50) +    # Anger has highest risk weight
-                            (fear_pct * 0.30) +     # Fear indicates concern/worry
-                            (joy_pct * -0.20) +     # Joy reduces risk
-                            (trust_pct * -0.10)     # Trust slightly reduces risk
-                        )
-                        emotion_risk_score = max(0, min(100, emotion_risk_score))  # Clamp to 0-100
-                        
-                        st.markdown(f"<br>**🎭 Topic Emotion Profile:**", unsafe_allow_html=True)
-                        
-                        # Display emotion breakdown
-                        emotion_cols = st.columns(4)
-                        with emotion_cols[0]:
-                            st.markdown(f"<div style='text-align: center;'><span style='color: #dc3545; font-size: 1.5rem;'>😠</span><br><strong>Anger:</strong> {anger_pct:.1f}%</div>", unsafe_allow_html=True)
-                        with emotion_cols[1]:
-                            st.markdown(f"<div style='text-align: center;'><span style='color: #ffc107; font-size: 1.5rem;'>😨</span><br><strong>Fear:</strong> {fear_pct:.1f}%</div>", unsafe_allow_html=True)
-                        with emotion_cols[2]:
-                            st.markdown(f"<div style='text-align: center;'><span style='color: #28a745; font-size: 1.5rem;'>😊</span><br><strong>Joy:</strong> {joy_pct:.1f}%</div>", unsafe_allow_html=True)
-                        with emotion_cols[3]:
-                            st.markdown(f"<div style='text-align: center;'><span style='color: #0066cc; font-size: 1.5rem;'>🤝</span><br><strong>Trust:</strong> {trust_pct:.1f}%</div>", unsafe_allow_html=True)
-                        
-                        # Emotion Risk Assessment
-                        st.markdown(f"<br>**⚖️ Emotion Risk Score: {emotion_risk_score:.2f}/100**")
-                        
-                        if emotion_risk_score >= 60:
-                            st.markdown("<span class='spike-alert'>🔴 High Emotional Risk - Strong negative emotions dominate</span>", unsafe_allow_html=True)
-                            st.markdown("<small style='color: #6c757d;'>Driven primarily by anger and fear responses</small>", unsafe_allow_html=True)
-                        elif emotion_risk_score >= 30:
-                            st.markdown("<span style='background-color: #ffc107; color: #1a1a2e; padding: 0.5rem 1rem; border-radius: 20px;'>🟡 Moderate Emotional Risk - Mixed emotions</span>", unsafe_allow_html=True)
-                            st.markdown("<small style='color: #6c757d;'>Balance of positive and negative emotions</small>", unsafe_allow_html=True)
-                        else:
-                            st.markdown("<span class='spike-normal'>🟢 Low Emotional Risk - Positive emotional tone</span>", unsafe_allow_html=True)
-                            st.markdown("<small style='color: #6c757d;'>Dominated by joy and trust responses</small>", unsafe_allow_html=True)
-                        
-                        # Store emotion risk in session state
-                        st.session_state['topic_emotion_risk'] = emotion_risk_score
-                        st.session_state['topic_emotions'] = {
-                            'anger': anger_pct,
-                            'fear': fear_pct,
-                            'joy': joy_pct,
-                            'trust': trust_pct
-                        }
                 
-                # Overall topic risk assessment (combining sentiment + emotion)
-                st.markdown("<br>")
+                st.markdown(f"<br><strong>📈 Total Data:</strong> {topic_volume:,}", unsafe_allow_html=True)
+                st.markdown(f"<strong>📉 Negative:</strong> {topic_negative_pct:.1f}%", unsafe_allow_html=True)
+                
+                emotion_html = f"""
+                <div style='display: flex; gap: 0.8rem; margin-top: 0.7rem; flex-wrap: wrap;'>
+                    <div style='flex: 1; min-width: 70px; text-align: center; background: rgba(220, 53, 69, 0.1); padding: 0.4rem; border-radius: 6px;'>
+                        <span style='color: #dc3545; font-size: 1.1rem;'>😠</span><br>
+                        <small style='color: #dc3545;'><strong>Anger</strong></small><br>
+                        <strong style='color: #dc3545;'>{anger_pct:.1f}%</strong>
+                    </div>
+                    <div style='flex: 1; min-width: 70px; text-align: center; background: rgba(255, 193, 7, 0.1); padding: 0.4rem; border-radius: 6px;'>
+                        <span style='color: #ffc107; font-size: 1.1rem;'>😨</span><br>
+                        <small style='color: #ffc107;'><strong>Fear</strong></small><br>
+                        <strong style='color: #ffc107;'>{fear_pct:.1f}%</strong>
+                    </div>
+                    <div style='flex: 1; min-width: 70px; text-align: center; background: rgba(40, 167, 69, 0.1); padding: 0.4rem; border-radius: 6px;'>
+                        <span style='color: #28a745; font-size: 1.1rem;'>😊</span><br>
+                        <small style='color: #28a745;'><strong>Joy</strong></small><br>
+                        <strong style='color: #28a745;'>{joy_pct:.1f}%</strong>
+                    </div>
+                    <div style='flex: 1; min-width: 70px; text-align: center; background: rgba(0, 102, 204, 0.1); padding: 0.4rem; border-radius: 6px;'>
+                        <span style='color: #0066cc; font-size: 1.1rem;'>🤝</span><br>
+                        <small style='color: #0066cc;'><strong>Trust</strong></small><br>
+                        <strong style='color: #0066cc;'>{trust_pct:.1f}%</strong>
+                    </div>
+                </div>
+                """
+                st.markdown(emotion_html, unsafe_allow_html=True)
+                
+                st.markdown(f"<br><strong>⚖️ Risk:</strong>", unsafe_allow_html=True)
                 if topic_negative_pct > 50:
-                    st.markdown("<span class='spike-alert'>High Risk Topic</span>", unsafe_allow_html=True)
+                    st.markdown("<span class='spike-alert'>High Risk</span>", unsafe_allow_html=True)
                 elif topic_negative_pct > 30:
-                    st.markdown("<span style='background-color: #ffc107; color: #1a1a2e; padding: 0.5rem 1rem; border-radius: 20px;'>Moderate Risk Topic</span>", unsafe_allow_html=True)
+                    st.markdown("<span style='background-color: #ffc107; color: #1a1a2e; padding: 0.4rem 0.9rem; border-radius: 20px;'>Moderate Risk</span>", unsafe_allow_html=True)
                 else:
-                    st.markdown("<span class='spike-normal'>✅ Low Risk Topic</span>", unsafe_allow_html=True)
+                    st.markdown("<span class='spike-normal'>✅ Low Risk</span>", unsafe_allow_html=True)
                 
                 st.markdown("</div>", unsafe_allow_html=True)
             
-            # Store for recommendation
             st.session_state['current_topic'] = current_topic
             st.session_state['topic_negative_pct'] = topic_negative_pct
             st.session_state['topic_stats'] = topic_stats
+            st.session_state['topic_emotion_risk'] = (anger_pct * 0.50 + fear_pct * 0.30 - joy_pct * 0.20 - trust_pct * 0.10)
     else:
         st.info("No topic data available. Please ensure 'final_topic' column exists from Colab clustering.")
     
@@ -1159,35 +1152,45 @@ def main():
     
     with col2:
         st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
-        st.markdown("**AI-Powered Recommendation**")
+        st.markdown("**📋 Communication Strategy**")
         
-        # Show LLM recommendation button for Medium/High risk
-        if topic_risk in ['High', 'Moderate']:
-            if st.button("Generate AI Recommendation", type="primary"):
-                with st.spinner("Generating strategic recommendation..."):
-                    current_topic = st.session_state.get('current_topic', 'Economic Policy')
-                    topic_negative_pct = st.session_state.get('topic_negative_pct', 0)
-                    narrative_summary = f"Topic '{current_topic}' shows {topic_negative_pct:.1f}% negative sentiment."
-                    
-                    recommendation = generate_recommendation_llm(
-                        current_topic, topic_negative_pct/100, topic_risk, narrative_summary,
-                        OPENAI_API_KEY
-                    )
-                    st.session_state['recommendation'] = recommendation
-            
-            if 'recommendation' in st.session_state:
-                rec = st.session_state['recommendation']
-                st.markdown("<div class='recommendation-box' style='margin-top: 1rem;'>", unsafe_allow_html=True)
-                st.markdown(f"**Strategy:** {rec['strategy']}")
-                st.markdown(f"**Channel:** {rec['channel']}")
-                st.markdown(f"**Tone:** {rec['tone']}")
-                st.markdown(f"**Target Stakeholder:** {rec['stakeholder']}")
-                st.markdown("**Key Messaging Points:**")
-                for point in rec['messaging']:
-                    st.markdown(f"• {point}")
-                st.markdown("</div>", unsafe_allow_html=True)
+        # Show recommendation based on risk level (no button needed)
+        if topic_risk == "High":
+            st.markdown("<div class='recommendation-box' style='margin-top: 1rem;'>", unsafe_allow_html=True)
+            st.markdown("**🔴 High Risk - Crisis Communication Protocol**")
+            st.markdown("**Channel:** Official Press Conference + Social Media Blitz")
+            st.markdown("**Tone:** Empathetic, Authoritative, Transparent")
+            st.markdown("**Target Stakeholder:** General Public, Media, Financial Markets")
+            st.markdown("**Key Messaging Points:**")
+            st.markdown("• Acknowledge concerns and provide reassurance")
+            st.markdown("• Present clear action plan with timeline")
+            st.markdown("• Deploy senior spokesperson for credibility")
+            st.markdown("• Monitor and respond to misinformation actively")
+            st.markdown("</div>", unsafe_allow_html=True)
+        elif topic_risk == "Moderate":
+            st.markdown("<div class='recommendation-box' style='margin-top: 1rem;'>", unsafe_allow_html=True)
+            st.markdown("**🟡 Moderate Risk - Proactive Engagement Strategy**")
+            st.markdown("**Channel:** Social Media + Industry Webinar")
+            st.markdown("**Tone:** Informative, Reassuring, Professional")
+            st.markdown("**Target Stakeholder:** Banking Community, Policy Makers")
+            st.markdown("**Key Messaging Points:**")
+            st.markdown("• Increase transparency through educational content")
+            st.markdown("• Engage key stakeholders in dialogue")
+            st.markdown("• Clarify misconceptions with factual data")
+            st.markdown("• Maintain consistent communication cadence")
+            st.markdown("</div>", unsafe_allow_html=True)
         else:
-            st.info("Topic sentiment is positive. No immediate action required. Continue regular monitoring.")
+            st.markdown("<div class='recommendation-box' style='margin-top: 1rem;'>", unsafe_allow_html=True)
+            st.markdown("**🟢 Low Risk - Maintenance & Monitoring**")
+            st.markdown("**Channel:** Regular Communication Channels")
+            st.markdown("**Tone:** Professional, Consistent")
+            st.markdown("**Target Stakeholder:** All Stakeholders")
+            st.markdown("**Key Messaging Points:**")
+            st.markdown("• Continue regular information dissemination")
+            st.markdown("• Monitor early warning signals")
+            st.markdown("• Maintain positive narrative momentum")
+            st.markdown("• Prepare contingency communications")
+            st.markdown("</div>", unsafe_allow_html=True)
         
         st.markdown("</div>", unsafe_allow_html=True)
     
