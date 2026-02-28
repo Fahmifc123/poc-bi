@@ -828,6 +828,14 @@ def main():
                     f"<div style='margin-top: 10px;'><span class='{alert_class}'>● {alert_text}</span></div>"
                     f"<div style='font-size: 0.75rem; color: #6c757d; margin-top: 5px;'>Threshold: {threshold:.1%}</div></div>", 
                     unsafe_allow_html=True)
+        
+        # Spike explanation tooltip-style
+        st.markdown(f"""
+        <small style='color: #6c757d; font-size: 0.7rem;'>
+        ℹ️ Spike detected when negative sentiment {'>'} mean ({mean_neg:.1%}) + std dev ({std_neg:.1%}). 
+        Indicates unusual surge in negative conversations requiring attention.
+        </small>
+        """, unsafe_allow_html=True)
     with col5:
         st.markdown(f"<div class='metric-card'><div class='metric-label'>Risk Level</div>"
                     f"<div style='margin-top: 10px;'><span class='risk-badge {risk_class}'>{risk_level}</span></div></div>", 
@@ -890,13 +898,13 @@ def main():
         st.plotly_chart(fig_sentiment, use_container_width=True, config={'displayModeBar': False})
         st.markdown("</div>", unsafe_allow_html=True)
     
-    # Emotion distribution - Time series view
+    # Emotion distribution - Time series view (like Sentiment)
     if data_source in ['Social Media', 'All'] and 'final_emotion' in df_filtered.columns:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
         st.markdown("**Emotion Trend Over Time**")
         
-        # Aggregate emotion by date - TIME SERIES view
+        # Aggregate emotion by date - TIME SERIES view with smoothing
         emotion_data = df_filtered[df_filtered['final_emotion'].notna()]
         if not emotion_data.empty:
             # Group by date and emotion for timeseries
@@ -904,20 +912,38 @@ def main():
             emotion_pivot = daily_emotion.pivot(index='date', columns='final_emotion', values='count').fillna(0)
             emotion_pivot_pct = emotion_pivot.div(emotion_pivot.sum(axis=1), axis=0) * 100
             
-            # Get emotions present (exclude neutral/no-emotion)
+            # Get top 4-5 emotions only (exclude neutral/no-emotion) for cleaner chart
             emotions_present = [col for col in emotion_pivot.columns if col.lower() not in ['neutral', 'no-emotion', 'noemotion']]
             
-            fig_emotion = go.Figure()
-            emotion_colors = {'joy': '#28a745', 'trust': '#0066cc', 'fear': '#ffc107', 'anger': '#dc3545'}
+            # Calculate total occurrence per emotion to find top ones
+            emotion_totals = {emotion: emotion_pivot[emotion].sum() for emotion in emotions_present}
+            sorted_emotions = sorted(emotion_totals.items(), key=lambda x: x[1], reverse=True)
+            top_emotions = [e[0] for e in sorted_emotions[:5]]  # Show top 5 emotions only
             
-            for emotion in emotions_present:
+            fig_emotion = go.Figure()
+            emotion_colors = {
+                'anger': '#dc3545', 
+                'fear': '#ffc107', 
+                'joy': '#28a745', 
+                'trust': '#0066cc',
+                'proud': '#9b59b6',
+                'sadness': '#95a5a6',
+                'surprised': '#17a2b8'
+            }
+            
+            # Add traces for top emotions with smoothed lines
+            for emotion in top_emotions:
                 if emotion in emotion_pivot_pct.columns:
+                    # Apply rolling average for smoother line (window=3 days)
+                    emotion_series = emotion_pivot_pct[emotion].rolling(window=3, center=True, min_periods=1).mean()
+                    
                     fig_emotion.add_trace(go.Scatter(
                         x=emotion_pivot_pct.index, 
-                        y=emotion_pivot_pct[emotion],
+                        y=emotion_series,
                         mode='lines',
                         name=emotion.capitalize(),
-                        line=dict(color=emotion_colors.get(emotion, '#6c757d'), width=2)
+                        line=dict(color=emotion_colors.get(emotion, '#6c757d'), width=2.5),
+                        hovertemplate=f'<b>{emotion.capitalize()}</b><br>Date: %{{x|%b %d}}<br>% of Total: %{{y:.1f}}%<extra></extra>'
                     ))
             
             # Add spike overlays
@@ -926,9 +952,13 @@ def main():
                     fig_emotion.add_vrect(x0=spike_date - timedelta(hours=12), x1=spike_date + timedelta(hours=12),
                                          fillcolor="rgba(255, 0, 0, 0.1)", layer="below", line_width=0)
             
-            fig_emotion.update_layout(margin=dict(l=20, r=20, t=30, b=20),
-                                    legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='center', x=0.5),
-                                    yaxis_title='% of Total')
+            fig_emotion.update_layout(
+                margin=dict(l=20, r=20, t=30, b=20),
+                legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='center', x=0.5),
+                yaxis_title='% of Total',
+                xaxis_title='Date',
+                hovermode='x unified'
+            )
             st.plotly_chart(fig_emotion, use_container_width=True, config={'displayModeBar': False})
             
             # No-emotion info below chart
