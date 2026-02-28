@@ -810,7 +810,7 @@ def main():
             fig_volume.add_annotation(text="No data available", showarrow=False, font=dict(size=20))
         
         fig_volume.update_layout(margin=dict(l=20, r=20, t=30, b=20), showlegend=False)
-        st.plotly_chart(fig_volume, use_container_width=True)
+        st.plotly_chart(fig_volume, use_container_width=True, config={'displayModeBar': False})
         st.markdown("</div>", unsafe_allow_html=True)
     
     with chart_col2:
@@ -841,7 +841,7 @@ def main():
         
         fig_sentiment.update_layout(margin=dict(l=20, r=20, t=30, b=20),
                                     legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='center', x=0.5))
-        st.plotly_chart(fig_sentiment, use_container_width=True)
+        st.plotly_chart(fig_sentiment, use_container_width=True, config={'displayModeBar': False})
         st.markdown("</div>", unsafe_allow_html=True)
     
     # Emotion distribution
@@ -852,11 +852,24 @@ def main():
         emotion_data = df_filtered[df_filtered['final_emotion'].notna()]
         if not emotion_data.empty:
             emotion_counts = emotion_data['final_emotion'].value_counts()
-            emotion_colors = {'joy': '#28a745', 'trust': '#0066cc', 'fear': '#ffc107', 'anger': '#dc3545', 'neutral': '#6c757d'}
-            fig_emotion = go.Figure(data=[go.Bar(x=emotion_counts.index.str.upper(), y=emotion_counts.values,
-                                                 marker_color=[emotion_colors.get(e, '#6c757d') for e in emotion_counts.index])])
+            # Separate no-emotion from other emotions
+            no_emotion_mask = emotion_counts.index.str.lower().str.replace('-', '').str.replace(' ', '') == 'noemotion'
+            no_emotion_count = int(emotion_counts[no_emotion_mask].sum())
+            no_emotion_pct = no_emotion_count / len(emotion_data) * 100
+            emotion_counts_filtered = emotion_counts[~no_emotion_mask]
+            emotion_colors = {
+                'joy': '#28a745', 'trust': '#0066cc', 'fear': '#ffc107', 'anger': '#dc3545',
+                'neutral': '#6c757d', 'proud': '#9b59b6', 'sadness': '#95a5a6', 'surprised': '#17a2b8'
+            }
+            fig_emotion = go.Figure(data=[go.Bar(
+                x=emotion_counts_filtered.index.str.upper(),
+                y=emotion_counts_filtered.values,
+                marker_color=[emotion_colors.get(e.lower(), '#6c757d') for e in emotion_counts_filtered.index]
+            )])
             fig_emotion.update_layout(margin=dict(l=20, r=20, t=20, b=20), showlegend=False)
-            st.plotly_chart(fig_emotion, use_container_width=True)
+            st.plotly_chart(fig_emotion, use_container_width=True, config={'displayModeBar': False})
+            if no_emotion_count > 0:
+                st.markdown(f"<small style='color: #6c757d;'>No-Emotion: {no_emotion_count:,} ({no_emotion_pct:.1f}% dari data)</small>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
     
     # =============================================================================
@@ -889,28 +902,23 @@ def main():
             with col1:
                 st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
                 st.markdown(f"**Top {top_n} Topics Distribution**")
-                st.markdown("<small>Click on pie slice to select topic</small>")
-                # Pie chart for topics (no labels, hover only)
+                # Pie chart for topics with % labels and legend
                 colors = px.colors.qualitative.Set3[:len(topic_stats_display)]
                 fig_topics = go.Figure(data=[go.Pie(
                     labels=topic_stats_display['topic'],
                     values=topic_stats_display['volume'],
                     hole=0.4,
                     marker_colors=colors,
-                    textinfo='none',  # No labels on chart
+                    textinfo='percent',
+                    textposition='inside',
                     hovertemplate='<b>%{label}</b><br>Data: %{value:,}<br>Share: %{percent}<extra></extra>'
                 )])
-                fig_topics.update_layout(margin=dict(l=20, r=20, t=30, b=20), showlegend=False)
-                
-                # Use plotly events to capture click
-                selected_pie_topic = st.plotly_chart(fig_topics, use_container_width=True, on_select="rerun", key="topic_pie")
-                
-                # Handle pie chart click
-                if selected_pie_topic and selected_pie_topic.get('selection', {}).get('points'):
-                    clicked_topic = selected_pie_topic['selection']['points'][0].get('label')
-                    if clicked_topic:
-                        st.session_state['clicked_topic'] = clicked_topic
-                        st.rerun()
+                fig_topics.update_layout(
+                    margin=dict(l=20, r=20, t=30, b=20),
+                    showlegend=True,
+                    legend=dict(orientation='v', x=1.02, y=0.5, font=dict(size=9))
+                )
+                st.plotly_chart(fig_topics, use_container_width=True, config={'displayModeBar': False})
                 
                 st.markdown("</div>", unsafe_allow_html=True)
             
@@ -1000,7 +1008,7 @@ def main():
                            fill_color=[['#f8f9fa', 'white'] * 3], align='left', font=dict(size=10))
             )])
             fig_risk.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=200)
-            st.plotly_chart(fig_risk, use_container_width=True)
+            st.plotly_chart(fig_risk, use_container_width=True, config={'displayModeBar': False})
         st.markdown("</div>", unsafe_allow_html=True)
     
     # =============================================================================
@@ -1072,66 +1080,6 @@ def main():
         
         st.markdown("</div>", unsafe_allow_html=True)
     
-    # =============================================================================
-    # SECTION 6 – EVALUATION SIMULATION
-    # =============================================================================
-    st.markdown("<div class='section-header'>📈 Evaluation Simulation</div>", unsafe_allow_html=True)
-    
-    col1, col2 = st.columns([1, 3])
-    
-    with col1:
-        st.markdown("**Intervention Settings**")
-        intervention_date = st.date_input("Intervention Date", value=min_date + timedelta(days=15),
-                                          min_value=min_date, max_value=max_date)
-        
-        # Safe date filtering
-        if not daily_metrics.empty and 'date' in daily_metrics.columns:
-            # Ensure date column is datetime
-            daily_metrics['date'] = pd.to_datetime(daily_metrics['date'], errors='coerce')
-            pre_data = daily_metrics[daily_metrics['date'].dt.date < intervention_date]
-            post_data = daily_metrics[daily_metrics['date'].dt.date >= intervention_date]
-        else:
-            pre_data = pd.DataFrame()
-            post_data = pd.DataFrame()
-        
-        if not pre_data.empty and not post_data.empty:
-            pre_negative = pre_data['negative_ratio'].mean()
-            post_negative = post_data['negative_ratio'].mean()
-            impact_score = ((pre_negative - post_negative) / pre_negative * 100) if pre_negative > 0 else 0
-            
-            impact_color = "#28a745" if impact_score > 0 else "#dc3545"
-            st.markdown(f"""<div class='metric-card' style='margin-top: 1rem;'>
-                <div class='metric-label'>Impact Score</div>
-                <div class='metric-value' style='color: {impact_color};'>{impact_score:.1f}%</div>
-            </div>""", unsafe_allow_html=True)
-            
-            effectiveness = "Effective" if impact_score > 20 else "Moderate" if impact_score > 0 else "Ineffective"
-            st.markdown(f"**Effectiveness:** {effectiveness}")
-        else:
-            st.info("Insufficient data for evaluation.")
-    
-    with col2:
-        st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
-        st.markdown("**Before vs After Intervention**")
-        fig_eval = go.Figure()
-        
-        if not daily_metrics.empty and 'date' in daily_metrics.columns:
-            if not pre_data.empty:
-                fig_eval.add_trace(go.Scatter(x=pre_data['date'], y=pre_data['negative_ratio'] * 100,
-                                              mode='lines', name='Pre-Intervention',
-                                              line=dict(color='#dc3545', width=2)))
-            if not post_data.empty:
-                fig_eval.add_trace(go.Scatter(x=post_data['date'], y=post_data['negative_ratio'] * 100,
-                                              mode='lines', name='Post-Intervention',
-                                              line=dict(color='#28a745', width=2)))
-            fig_eval.add_vline(x=pd.Timestamp(intervention_date).timestamp() * 1000, line_dash="dash", line_color="#0066cc", annotation_text="Intervention")
-        else:
-            fig_eval.add_annotation(text="No data available", showarrow=False, font=dict(size=20))
-        
-        fig_eval.update_layout(margin=dict(l=20, r=20, t=30, b=20),
-                               legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='center', x=0.5))
-        st.plotly_chart(fig_eval, use_container_width=True, key="eval_chart")
-        st.markdown("</div>", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
