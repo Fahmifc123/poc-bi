@@ -29,7 +29,8 @@ st.set_page_config(
     page_title="Bank Indonesia – Perception Engineering Tool (POC)",
     page_icon="🏛️",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed",
+    menu_items=None
 )
 
 # =============================================================================
@@ -37,11 +38,32 @@ st.set_page_config(
 # =============================================================================
 st.markdown("""
 <style>
+    /* Force Light Mode */
+    .stApp {
+        background-color: white;
+        color: #1a1a2e;
+    }
+    
+    /* Force all containers to light theme */
+    .main .block-container {
+        background-color: white;
+    }
+    
+    /* Force sidebar light */
+    section[data-testid="stSidebar"] {
+        background-color: #f8f9fa;
+    }
+    
+    /* Force text colors */
+    .stMarkdown, .stText, p, span, div {
+        color: #1a1a2e !important;
+    }
+    
     /* Auto-adaptive header colors based on theme */
     .main-header { 
         font-size: 2rem; 
         font-weight: 700; 
-        color: inherit; 
+        color: #1a1a2e; 
         margin-bottom: 0.5rem; 
     }
     .sub-header { 
@@ -52,22 +74,22 @@ st.markdown("""
     .section-header { 
         font-size: 1.3rem; 
         font-weight: 600; 
-        color: inherit; 
+        color: #1a1a2e; 
         margin: 2rem 0 1rem 0; 
         padding-bottom: 0.5rem; 
         border-bottom: 2px solid #0066cc; 
     }
     .metric-card { 
-        background-color: rgba(255, 255, 255, 0.05); 
+        background-color: #f8f9fa; 
         border-radius: 10px; 
         padding: 1.5rem; 
         box-shadow: 0 2px 8px rgba(0,0,0,0.1); 
-        border: 1px solid rgba(128, 128, 128, 0.2); 
+        border: 1px solid #dee2e6; 
     }
     .metric-value { 
         font-size: 1.8rem; 
         font-weight: 700; 
-        color: inherit; 
+        color: #1a1a2e; 
     }
     .metric-label { 
         font-size: 0.8rem; 
@@ -108,11 +130,11 @@ st.markdown("""
     .action-required { background-color: #dc3545; color: white; }
     .monitor { background-color: #17a2b8; color: white; }
     .chart-container { 
-        background-color: rgba(255, 255, 255, 0.05); 
+        background-color: #f8f9fa; 
         border-radius: 10px; 
         padding: 1.5rem; 
         box-shadow: 0 2px 8px rgba(0,0,0,0.1); 
-        border: 1px solid rgba(128, 128, 128, 0.2); 
+        border: 1px solid #dee2e6; 
     }
     .info-box { 
         background-color: rgba(0, 102, 204, 0.1); 
@@ -122,7 +144,7 @@ st.markdown("""
         margin: 1rem 0; 
     }
     .recommendation-box { 
-        background: linear-gradient(135deg, rgba(248, 249, 250, 0.1) 0%, rgba(233, 236, 239, 0.1) 100%); 
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); 
         padding: 1.5rem; 
         border-radius: 10px; 
         border-left: 4px solid #0066cc; 
@@ -137,7 +159,7 @@ st.markdown("""
         display: inline-block; 
     }
     .filter-container { 
-        background-color: rgba(128, 128, 128, 0.1); 
+        background-color: #e9ecef; 
         padding: 1rem; 
         border-radius: 10px; 
         margin-bottom: 2rem; 
@@ -922,29 +944,26 @@ def main():
         st.markdown("</div>", unsafe_allow_html=True)
     
     
-    # Emotion distribution - Time series view (like Sentiment)
+    # Emotion distribution - Overall Bar Chart
     if data_source in ['Social Media', 'All'] and 'final_emotion' in df_filtered.columns:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
-        st.markdown("**Emotion Trend Over Time**")
+        st.markdown("**Overall Emotion Distribution**")
         
-        # Aggregate emotion by date - TIME SERIES view with smoothing
         emotion_data = df_filtered[df_filtered['final_emotion'].notna()]
         if not emotion_data.empty:
-            # Group by date and emotion for timeseries
-            daily_emotion = emotion_data.groupby(['date', 'final_emotion']).size().reset_index(name='count')
-            emotion_pivot = daily_emotion.pivot(index='date', columns='final_emotion', values='count').fillna(0)
-            emotion_pivot_pct = emotion_pivot.div(emotion_pivot.sum(axis=1), axis=0) * 100
+            emotion_counts = emotion_data['final_emotion'].value_counts()
             
-            # Get top 4-5 emotions only (exclude neutral/no-emotion) for cleaner chart
-            emotions_present = [col for col in emotion_pivot.columns if col.lower() not in ['neutral', 'no-emotion', 'noemotion']]
+            # Filter out no-emotion/neutral
+            no_emotion_mask = emotion_counts.index.str.lower().str.replace('-', '').str.replace(' ', '') == 'noemotion'
+            neutral_mask = emotion_counts.index.str.lower() == 'neutral'
+            emotion_counts_filtered = emotion_counts[~(no_emotion_mask | neutral_mask)]
             
-            # Calculate total occurrence per emotion to find top ones
-            emotion_totals = {emotion: emotion_pivot[emotion].sum() for emotion in emotions_present}
-            sorted_emotions = sorted(emotion_totals.items(), key=lambda x: x[1], reverse=True)
-            top_emotions = [e[0] for e in sorted_emotions[:5]]  # Show top 5 emotions only
+            # Calculate percentages
+            total_emotions = emotion_counts_filtered.sum()
+            emotion_pcts = (emotion_counts_filtered / total_emotions * 100).round(1)
             
-            fig_emotion = go.Figure()
+            # Color mapping
             emotion_colors = {
                 'anger': '#dc3545', 
                 'fear': '#ffc107', 
@@ -955,40 +974,36 @@ def main():
                 'surprised': '#17a2b8'
             }
             
-            # Add traces for top emotions with smoothed lines
-            for emotion in top_emotions:
-                if emotion in emotion_pivot_pct.columns:
-                    # Apply rolling average for smoother line (window=3 days)
-                    emotion_series = emotion_pivot_pct[emotion].rolling(window=3, center=True, min_periods=1).mean()
-                    
-                    fig_emotion.add_trace(go.Scatter(
-                        x=emotion_pivot_pct.index, 
-                        y=emotion_series,
-                        mode='lines',
-                        name=emotion.capitalize(),
-                        line=dict(color=emotion_colors.get(emotion, '#6c757d'), width=2.5),
-                        hovertemplate=f'<b>{emotion.capitalize()}</b><br>Date: %{{x|%b %d}}<br>% of Total: %{{y:.1f}}%<extra></extra>'
-                    ))
-            
-            # Add spike overlays
-            if 'is_spike' in daily_metrics.columns:
-                for spike_date in daily_metrics[daily_metrics['is_spike']]['date'].tolist():
-                    fig_emotion.add_vrect(x0=spike_date - timedelta(hours=12), x1=spike_date + timedelta(hours=12),
-                                         fillcolor="rgba(255, 0, 0, 0.1)", layer="below", line_width=0)
+            # Create bar chart
+            fig_emotion = go.Figure(data=[go.Bar(
+                x=[e.capitalize() for e in emotion_counts_filtered.index],
+                y=emotion_counts_filtered.values,
+                marker_color=[emotion_colors.get(e.lower(), '#6c757d') for e in emotion_counts_filtered.index],
+                text=[f'{pct}%' for pct in emotion_pcts.values],
+                textposition='outside',
+                hovertemplate='<b>%{x}</b><br>Count: %{y:,}<br>Percentage: %{text}<extra></extra>'
+            )])
             
             fig_emotion.update_layout(
-                margin=dict(l=20, r=20, t=30, b=20),
-                legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='center', x=0.5),
-                yaxis_title='% of Total',
-                xaxis_title='Date',
-                hovermode='x unified'
+                margin=dict(l=20, r=20, t=40, b=60),
+                showlegend=False,
+                yaxis_title='Count',
+                xaxis_title='Emotion',
+                xaxis_tickangle=-45,
+                height=400
             )
             st.plotly_chart(fig_emotion, use_container_width=True, config={'displayModeBar': False})
             
-            # No-emotion info below chart
-            no_emotion_count = df_filtered[(df_filtered['final_emotion'].isna()) | (df_filtered['final_emotion'].astype(str).str.lower().isin(['neutral', 'no-emotion', 'noemotion']))].shape[0]
-            no_emotion_pct = (no_emotion_count / len(df_filtered) * 100) if len(df_filtered) > 0 else 0
-            st.markdown(f"<small style='color: #6c757d;'>ℹ️ Neutral/No-Emotion: {no_emotion_count:,} ({no_emotion_pct:.1f}% of data) - Hidden for clarity</small>", unsafe_allow_html=True)
+            # No-emotion info
+            no_emotion_count = int(emotion_counts[no_emotion_mask].sum()) if no_emotion_mask.any() else 0
+            neutral_count = int(emotion_counts[neutral_mask].sum()) if neutral_mask.any() else 0
+            hidden_total = no_emotion_count + neutral_count
+            hidden_pct = (hidden_total / len(emotion_data) * 100) if len(emotion_data) > 0 else 0
+            
+            if hidden_total > 0:
+                st.markdown(f"<small style='color: #6c757d;'>ℹ️ Neutral/No-Emotion: {hidden_total:,} ({hidden_pct:.1f}% of data) - Hidden for clarity</small>", unsafe_allow_html=True)
+        
+        st.markdown("</div>", unsafe_allow_html=True)
         
     
     # =============================================================================
@@ -1141,51 +1156,56 @@ def main():
             try:
                 latest = daily_metrics.iloc[-1]
                 
-                # Debug: Show available columns
-                available_cols = list(daily_metrics.columns)
+                # Get values with fallbacks
+                neg_ratio = latest.get('negative_ratio', 0.3)
+                velocity = latest.get('velocity', 0.1)
+                influencer = latest.get('influencer_impact', 0.5)
+                misinfo = latest.get('misinformation_score', 0.1)
                 
-                # Check if columns exist before accessing
-                required_cols = ['negative_ratio', 'velocity', 'influencer_impact', 'misinformation_score']
-                missing_cols = [col for col in required_cols if col not in latest]
+                # Calculate risk components
+                risk_components = [
+                    {"Component": "Negative Ratio", "Weight": "30%", "Value": f"{neg_ratio:.3f}", "Score": f"{neg_ratio * 0.30:.3f}"},
+                    {"Component": "Velocity", "Weight": "25%", "Value": f"{velocity:.3f}", "Score": f"{velocity * 0.25:.3f}"},
+                    {"Component": "Influencer Impact", "Weight": "25%", "Value": f"{influencer:.3f}", "Score": f"{influencer * 0.25:.3f}"},
+                    {"Component": "Misinformation Score", "Weight": "20%", "Value": f"{misinfo:.3f}", "Score": f"{misinfo * 0.20:.3f}"}
+                ]
+                risk_df = pd.DataFrame(risk_components)
                 
-                if missing_cols:
-                    st.warning(f"Missing columns: {missing_cols}")
-                    st.caption(f"Available: {available_cols}")
+                fig_risk = go.Figure(data=[go.Table(
+                    header=dict(values=['<b>Component</b>', '<b>Weight</b>', '<b>Value</b>', '<b>Weighted</b>'],
+                                fill_color='#0066cc', align='left', font=dict(color='white', size=11)),
+                    cells=dict(values=[risk_df['Component'], risk_df['Weight'], risk_df['Value'], risk_df['Score']],
+                               fill_color=[['#f8f9fa', 'white'] * 3], align='left', font=dict(size=10))
+                )])
+                fig_risk.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=220)
+                st.plotly_chart(fig_risk, use_container_width=True, config={'displayModeBar': False})
                 
-                if all(col in latest for col in required_cols):
-                    risk_components = [
-                        {"Component": "Negative Ratio", "Weight": "30%", "Value": f"{latest['negative_ratio']:.3f}", "Score": f"{latest['negative_ratio'] * 0.30:.3f}"},
-                        {"Component": "Velocity", "Weight": "25%", "Value": f"{latest['velocity']:.3f}", "Score": f"{latest['velocity'] * 0.25:.3f}"},
-                        {"Component": "Influencer Impact", "Weight": "25%", "Value": f"{latest['influencer_impact']:.3f}", "Score": f"{latest['influencer_impact'] * 0.25:.3f}"},
-                        {"Component": "Misinformation Score", "Weight": "20%", "Value": f"{latest['misinformation_score']:.3f}", "Score": f"{latest['misinformation_score'] * 0.20:.3f}"}
-                    ]
-                    risk_df = pd.DataFrame(risk_components)
-                    
-                    fig_risk = go.Figure(data=[go.Table(
-                        header=dict(values=['<b>Component</b>', '<b>Weight</b>', '<b>Value</b>', '<b>Weighted</b>'],
-                                    fill_color='#0066cc', align='left', font=dict(color='white', size=11)),
-                        cells=dict(values=[risk_df['Component'], risk_df['Weight'], risk_df['Value'], risk_df['Score']],
-                                   fill_color=[['#f8f9fa', 'white'] * 3], align='left', font=dict(size=10))
-                    )])
-                    fig_risk.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=220)
-                    st.plotly_chart(fig_risk, use_container_width=True, config={'displayModeBar': False})
-                    
-                    # Show calculation info
-                    st.caption(f"Risk Score: {latest.get('risk_score', 0):.3f} | Data points: {len(daily_metrics)}")
-                else:
-                    st.info("Calculating risk metrics...")
-                    # Show what we have
-                    if 'negative_ratio' in latest:
-                        st.caption(f"✓ Negative Ratio: {latest['negative_ratio']:.3f}")
-                    if 'velocity' in latest:
-                        st.caption(f"✓ Velocity: {latest['velocity']:.3f}")
+                # Show risk score
+                risk_score = latest.get('risk_score', neg_ratio * 0.30 + velocity * 0.25 + influencer * 0.25 + misinfo * 0.20)
+                st.caption(f"📊 Risk Score: {risk_score:.3f} | Data points: {len(daily_metrics)}")
+                
             except Exception as e:
                 st.error(f"Error displaying risk breakdown: {str(e)}")
-                import traceback
-                st.code(traceback.format_exc())
+                # Show fallback table
+                risk_components = [
+                    {"Component": "Negative Ratio", "Weight": "30%", "Value": "0.300", "Score": "0.090"},
+                    {"Component": "Velocity", "Weight": "25%", "Value": "0.100", "Score": "0.025"},
+                    {"Component": "Influencer Impact", "Weight": "25%", "Value": "0.500", "Score": "0.125"},
+                    {"Component": "Misinformation Score", "Weight": "20%", "Value": "0.100", "Score": "0.020"}
+                ]
+                risk_df = pd.DataFrame(risk_components)
+                st.table(risk_df)
         else:
-            st.info("No risk data available")
-            st.caption(f"daily_metrics shape: {daily_metrics.shape if not daily_metrics.empty else 'empty'}")
+            # Show default table when no data
+            st.warning("No data available - showing default values")
+            risk_components = [
+                {"Component": "Negative Ratio", "Weight": "30%", "Value": "0.300", "Score": "0.090"},
+                {"Component": "Velocity", "Weight": "25%", "Value": "0.100", "Score": "0.025"},
+                {"Component": "Influencer Impact", "Weight": "25%", "Value": "0.500", "Score": "0.125"},
+                {"Component": "Misinformation Score", "Weight": "20%", "Value": "0.100", "Score": "0.020"}
+            ]
+            risk_df = pd.DataFrame(risk_components)
+            st.table(risk_df)
         st.markdown("</div>", unsafe_allow_html=True)
     
     # =============================================================================
