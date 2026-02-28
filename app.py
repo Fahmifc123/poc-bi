@@ -217,6 +217,38 @@ def load_data():
         if 'share' in df_sosmed.columns:
             df_sosmed['shares'] = df_sosmed['share']
         
+        # Calculate influencer score based on followers and engagement
+        # Priority: 1) Followers count, 2) Engagement (likes + shares + comments), 3) Reach
+        if 'followers' in df_sosmed.columns:
+            # Normalize followers (log scale to handle large differences)
+            df_sosmed['followers_clean'] = pd.to_numeric(df_sosmed['followers'], errors='coerce').fillna(0)
+            df_sosmed['influencer_score'] = np.log1p(df_sosmed['followers_clean'])
+            
+            # Add engagement boost if available
+            engagement_cols = []
+            if 'engagement' in df_sosmed.columns:
+                engagement_cols.append('engagement')
+            else:
+                if 'like' in df_sosmed.columns:
+                    engagement_cols.append('like')
+                if 'share' in df_sosmed.columns:
+                    engagement_cols.append('share')
+                if 'comment' in df_sosmed.columns:
+                    engagement_cols.append('comment')
+            
+            if engagement_cols:
+                total_engagement = df_sosmed[engagement_cols].apply(pd.to_numeric, errors='coerce').sum(axis=1).fillna(0)
+                # Add engagement weight (log scale)
+                df_sosmed['influencer_score'] += np.log1p(total_engagement) * 0.5
+            
+            # Normalize influencer score to 0-1 range
+            max_score = df_sosmed['influencer_score'].max()
+            if max_score > 0:
+                df_sosmed['influencer_score'] = df_sosmed['influencer_score'] / max_score
+        else:
+            # Fallback: use engagement only if followers not available
+            df_sosmed['influencer_score'] = 0.5  # Default neutral score
+        
         # Drop rows with invalid dates
         # Ensure final_sentiment column exists (check 'sentiment' from CSV)
         if 'sentiment' in df_sosmed.columns and 'final_sentiment' not in df_sosmed.columns:
@@ -465,7 +497,7 @@ def cluster_topics(df):
 # =============================================================================
 # RISK CALCULATION
 # =============================================================================
-def calculate_risk_metrics(daily_df):
+def calculate_risk_metrics(daily_df, raw_df=None):
     """Calculate risk metrics with dynamic spike detection."""
     if daily_df.empty:
         return daily_df
@@ -477,18 +509,31 @@ def calculate_risk_metrics(daily_df):
     
     daily_df['is_spike'] = daily_df['negative_ratio'] > threshold
     daily_df['velocity'] = daily_df['volume'].pct_change().fillna(0).abs().clip(0, 1)
-    daily_df['topic_sensitivity'] = daily_df['negative_ratio'].clip(0, 1)
     
     # Deterministic misinformation score (reproducible)
     daily_df['misinformation_score'] = (
         daily_df['negative_ratio'] * daily_df['velocity']
     ).clip(0, 1)
     
-    daily_df['influencer_impact'] = daily_df['volume'].rank(pct=True)
+    # Calculate influencer impact from raw data if available
+    # Uses followers count and engagement metrics
+    if raw_df is not None and 'influencer_score' in raw_df.columns:
+        # Group by date and calculate average influencer score per day
+        daily_influencer = raw_df.groupby(raw_df['date'].dt.date)['influencer_score'].mean()
+        
+        # Map to daily_df dates
+        daily_df['date_normalized'] = daily_df['date'].dt.date
+        daily_df['influencer_impact'] = daily_df['date_normalized'].map(daily_influencer).fillna(0.5)
+        daily_df.drop(columns=['date_normalized'], inplace=True)
+    else:
+        # Fallback: use volume-based ranking
+        daily_df['influencer_impact'] = daily_df['volume'].rank(pct=True)
+    
     daily_df['risk_score'] = (
-        0.25 * daily_df['negative_ratio'] + 0.20 * daily_df['velocity'] +
-        0.20 * daily_df['influencer_impact'] + 0.20 * daily_df['topic_sensitivity'] +
-        0.15 * daily_df['misinformation_score']
+        0.30 * daily_df['negative_ratio'] +      # Negative sentiment ratio (30%)
+        0.25 * daily_df['velocity'] +            # Volume velocity/acceleration (25%)
+        0.25 * daily_df['influencer_impact'] +   # Influencer impact score (25%)
+        0.20 * daily_df['misinformation_score']  # Misinformation potential (20%)
     )
     return daily_df
 
@@ -738,7 +783,8 @@ def main():
             'final_sentiment': lambda x: (x == 'negative').mean()
         }).reset_index()
         daily_metrics.columns = ['date', 'volume', 'negative_ratio']
-        daily_metrics = calculate_risk_metrics(daily_metrics)
+        # Pass raw df_data to calculate influencer impact from followers/engagement
+        daily_metrics = calculate_risk_metrics(daily_metrics, raw_df=df_data)
         daily_metrics = smooth_timeseries(daily_metrics)
     else:
         # Create empty dataframe with required columns
@@ -844,19 +890,65 @@ def main():
         st.plotly_chart(fig_sentiment, use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
     
-    # Emotion distribution
+    # Emotion distribution - Time series view
     if data_source in ['Social Media', 'All'] and 'final_emotion' in df_filtered.columns:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
-        st.markdown("**Emotion Distribution**")
+        st.markdown("**Emotion Trend Over Time**")
+        
+        # Aggregate emotion by date
         emotion_data = df_filtered[df_filtered['final_emotion'].notna()]
         if not emotion_data.empty:
-            emotion_counts = emotion_data['final_emotion'].value_counts()
-            emotion_colors = {'joy': '#28a745', 'trust': '#0066cc', 'fear': '#ffc107', 'anger': '#dc3545', 'neutral': '#6c757d'}
-            fig_emotion = go.Figure(data=[go.Bar(x=emotion_counts.index.str.upper(), y=emotion_counts.values,
-                                                 marker_color=[emotion_colors.get(e, '#6c757d') for e in emotion_counts.index])])
-            fig_emotion.update_layout(margin=dict(l=20, r=20, t=20, b=20), showlegend=False)
+            # Group by date and emotion
+            daily_emotion = emotion_data.groupby(['date', 'final_emotion']).size().reset_index(name='count')
+            
+            # Pivot for line chart
+            emotion_pivot = daily_emotion.pivot(index='date', columns='final_emotion', values='count').fillna(0)
+            
+            # Calculate percentage per day
+            emotion_pivot_pct = emotion_pivot.div(emotion_pivot.sum(axis=1), axis=0) * 100
+            
+            # Get emotions present in data
+            emotions_present = [col for col in emotion_pivot.columns if col != 'neutral']
+            
+            fig_emotion = go.Figure()
+            
+            # Add traces for each emotion (excluding neutral)
+            emotion_colors = {'joy': '#28a745', 'trust': '#0066cc', 'fear': '#ffc107', 'anger': '#dc3545'}
+            
+            for emotion in emotions_present:
+                if emotion in emotion_pivot_pct.columns:
+                    fig_emotion.add_trace(go.Scatter(
+                        x=emotion_pivot_pct.index, 
+                        y=emotion_pivot_pct[emotion],
+                        mode='lines',
+                        name=emotion.capitalize(),
+                        line=dict(color=emotion_colors.get(emotion, '#6c757d'), width=2)
+                    ))
+            
+            # Add spike overlays if available
+            if 'is_spike' in daily_metrics.columns:
+                for spike_date in daily_metrics[daily_metrics['is_spike']]['date'].tolist():
+                    fig_emotion.add_vrect(
+                        x0=spike_date - timedelta(hours=12), 
+                        x1=spike_date + timedelta(hours=12),
+                        fillcolor="rgba(255, 0, 0, 0.1)", 
+                        layer="below", 
+                        line_width=0
+                    )
+            
+            fig_emotion.update_layout(
+                margin=dict(l=20, r=20, t=30, b=20),
+                legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='center', x=0.5),
+                yaxis_title='% of Total'
+            )
             st.plotly_chart(fig_emotion, use_container_width=True)
+            
+            # No-emotion info
+            no_emotion_count = df_filtered[df_filtered['final_emotion'].isna() | (df_filtered['final_emotion'] == 'neutral')].shape[0]
+            no_emotion_pct = (no_emotion_count / len(df_filtered) * 100) if len(df_filtered) > 0 else 0
+            st.markdown(f"<small style='color: #6c757d;'>ℹ️ Neutral/No-emotion data: {no_emotion_count:,} ({no_emotion_pct:.1f}%) - Hidden from chart for clarity</small>", unsafe_allow_html=True)
+            
         st.markdown("</div>", unsafe_allow_html=True)
     
     # =============================================================================
@@ -942,7 +1034,72 @@ def main():
                 st.markdown(f"<br>**Total Data:** {topic_volume:,}", unsafe_allow_html=True)
                 st.markdown(f"**Negative Sentiment:** {topic_negative_pct:.1f}%", unsafe_allow_html=True)
                 
-                # Topic risk assessment
+                # Topic Emotion Analysis & Risk Calculation
+                if 'final_emotion' in df_filtered.columns:
+                    topic_emotions = df_filtered[
+                        (df_filtered['final_topic'] == current_topic) & 
+                        (df_filtered['final_emotion'].notna()) &
+                        (df_filtered['final_emotion'] != 'neutral')
+                    ]
+                    
+                    if not topic_emotions.empty:
+                        emotion_counts = topic_emotions['final_emotion'].value_counts()
+                        total_emotion = emotion_counts.sum()
+                        
+                        # Calculate emotion percentages
+                        anger_pct = (emotion_counts.get('anger', 0) / total_emotion * 100) if total_emotion > 0 else 0
+                        fear_pct = (emotion_counts.get('fear', 0) / total_emotion * 100) if total_emotion > 0 else 0
+                        
+                        # Emotion-based risk score for topic
+                        # Formula: (anger% * 0.5) + (fear% * 0.3) + (joy% * -0.2)
+                        joy_pct = (emotion_counts.get('joy', 0) / total_emotion * 100) if total_emotion > 0 else 0
+                        trust_pct = (emotion_counts.get('trust', 0) / total_emotion * 100) if total_emotion > 0 else 0
+                        
+                        emotion_risk_score = (
+                            (anger_pct * 0.50) +    # Anger has highest risk weight
+                            (fear_pct * 0.30) +     # Fear indicates concern/worry
+                            (joy_pct * -0.20) +     # Joy reduces risk
+                            (trust_pct * -0.10)     # Trust slightly reduces risk
+                        )
+                        emotion_risk_score = max(0, min(100, emotion_risk_score))  # Clamp to 0-100
+                        
+                        st.markdown(f"<br>**🎭 Topic Emotion Profile:**", unsafe_allow_html=True)
+                        
+                        # Display emotion breakdown
+                        emotion_cols = st.columns(4)
+                        with emotion_cols[0]:
+                            st.markdown(f"<div style='text-align: center;'><span style='color: #dc3545; font-size: 1.5rem;'>😠</span><br><strong>Anger:</strong> {anger_pct:.1f}%</div>", unsafe_allow_html=True)
+                        with emotion_cols[1]:
+                            st.markdown(f"<div style='text-align: center;'><span style='color: #ffc107; font-size: 1.5rem;'>😨</span><br><strong>Fear:</strong> {fear_pct:.1f}%</div>", unsafe_allow_html=True)
+                        with emotion_cols[2]:
+                            st.markdown(f"<div style='text-align: center;'><span style='color: #28a745; font-size: 1.5rem;'>😊</span><br><strong>Joy:</strong> {joy_pct:.1f}%</div>", unsafe_allow_html=True)
+                        with emotion_cols[3]:
+                            st.markdown(f"<div style='text-align: center;'><span style='color: #0066cc; font-size: 1.5rem;'>🤝</span><br><strong>Trust:</strong> {trust_pct:.1f}%</div>", unsafe_allow_html=True)
+                        
+                        # Emotion Risk Assessment
+                        st.markdown(f"<br>**⚖️ Emotion Risk Score: {emotion_risk_score:.2f}/100**")
+                        
+                        if emotion_risk_score >= 60:
+                            st.markdown("<span class='spike-alert'>🔴 High Emotional Risk - Strong negative emotions dominate</span>", unsafe_allow_html=True)
+                            st.markdown("<small style='color: #6c757d;'>Driven primarily by anger and fear responses</small>", unsafe_allow_html=True)
+                        elif emotion_risk_score >= 30:
+                            st.markdown("<span style='background-color: #ffc107; color: #1a1a2e; padding: 0.5rem 1rem; border-radius: 20px;'>🟡 Moderate Emotional Risk - Mixed emotions</span>", unsafe_allow_html=True)
+                            st.markdown("<small style='color: #6c757d;'>Balance of positive and negative emotions</small>", unsafe_allow_html=True)
+                        else:
+                            st.markdown("<span class='spike-normal'>🟢 Low Emotional Risk - Positive emotional tone</span>", unsafe_allow_html=True)
+                            st.markdown("<small style='color: #6c757d;'>Dominated by joy and trust responses</small>", unsafe_allow_html=True)
+                        
+                        # Store emotion risk in session state
+                        st.session_state['topic_emotion_risk'] = emotion_risk_score
+                        st.session_state['topic_emotions'] = {
+                            'anger': anger_pct,
+                            'fear': fear_pct,
+                            'joy': joy_pct,
+                            'trust': trust_pct
+                        }
+                
+                # Overall topic risk assessment (combining sentiment + emotion)
+                st.markdown("<br>")
                 if topic_negative_pct > 50:
                     st.markdown("<span class='spike-alert'>High Risk Topic</span>", unsafe_allow_html=True)
                 elif topic_negative_pct > 30:
@@ -986,11 +1143,10 @@ def main():
         if not daily_metrics.empty:
             latest = daily_metrics.iloc[-1]
             risk_components = [
-                {"Component": "Negative Ratio", "Weight": "25%", "Value": f"{latest['negative_ratio']:.3f}", "Score": f"{latest['negative_ratio'] * 0.25:.3f}"},
-                {"Component": "Velocity", "Weight": "20%", "Value": f"{latest['velocity']:.3f}", "Score": f"{latest['velocity'] * 0.20:.3f}"},
-                {"Component": "Influencer Impact", "Weight": "20%", "Value": f"{latest['influencer_impact']:.3f}", "Score": f"{latest['influencer_impact'] * 0.20:.3f}"},
-                {"Component": "Topic Sensitivity", "Weight": "20%", "Value": f"{latest['topic_sensitivity']:.3f}", "Score": f"{latest['topic_sensitivity'] * 0.20:.3f}"},
-                {"Component": "Misinformation Score", "Weight": "15%", "Value": f"{latest['misinformation_score']:.3f}", "Score": f"{latest['misinformation_score'] * 0.15:.3f}"}
+                {"Component": "Negative Ratio", "Weight": "30%", "Value": f"{latest['negative_ratio']:.3f}", "Score": f"{latest['negative_ratio'] * 0.30:.3f}"},
+                {"Component": "Velocity", "Weight": "25%", "Value": f"{latest['velocity']:.3f}", "Score": f"{latest['velocity'] * 0.25:.3f}"},
+                {"Component": "Influencer Impact", "Weight": "25%", "Value": f"{latest['influencer_impact']:.3f}", "Score": f"{latest['influencer_impact'] * 0.25:.3f}"},
+                {"Component": "Misinformation Score", "Weight": "20%", "Value": f"{latest['misinformation_score']:.3f}", "Score": f"{latest['misinformation_score'] * 0.20:.3f}"}
             ]
             risk_df = pd.DataFrame(risk_components)
             fig_risk = go.Figure(data=[go.Table(
@@ -1001,6 +1157,34 @@ def main():
             )])
             fig_risk.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=200)
             st.plotly_chart(fig_risk, use_container_width=True)
+            
+            # Formula explanations
+            st.markdown("<br>**📊 Risk Component Formulas:**")
+            st.markdown("""
+            <div class='info-box'>
+            **1. Negative Ratio (30%)**<br>
+            • Formula: `(count of negative posts / total posts)`<br>
+            • Measures: Proportion of negative sentiment in daily conversations<br>
+            • Why it matters: Higher negative ratio indicates perception crisis
+            
+            **2. Velocity (25%)**<br>
+            • Formula: `abs((today_volume - yesterday_volume) / yesterday_volume)`<br>
+            • Measures: Rate of change in conversation volume (acceleration)<br>
+            • Why it matters: Sudden spikes indicate viral spread or emerging issues
+            
+            **3. Influencer Impact (25%)**<br>
+            • Formula: `log1p(followers) + 0.5 * log1p(engagement)` normalized to 0-1<br>
+            • Data Sources: `followers`, `likes`, `shares`, `comments`, `engagement`<br>
+            • Measures: Daily average influencer score based on follower count and engagement<br>
+            • Why it matters: Posts from high-follower accounts amplify message reach and credibility
+            
+            **4. Misinformation Score (20%)**<br>
+            • Formula: `negative_ratio × velocity`<br>
+            • Measures: Compound risk of negative content spreading rapidly<br>
+            • Why it matters: Fast-spreading negativity often contains misinformation
+            </div>
+            """, unsafe_allow_html=True)
+            
         st.markdown("</div>", unsafe_allow_html=True)
     
     # =============================================================================
@@ -1008,13 +1192,20 @@ def main():
     # =============================================================================
     st.markdown("<div class='section-header'>Decision Trigger & AI Recommendation</div>", unsafe_allow_html=True)
     
-    # Decision trigger based on selected topic
+    # Decision trigger based on selected topic (combining sentiment + emotion risk)
     topic_risk = "Low"
     if 'topic_negative_pct' in st.session_state:
         topic_negative_pct = st.session_state['topic_negative_pct']
-        if topic_negative_pct > 50:
+        
+        # Get emotion risk if available
+        emotion_risk = st.session_state.get('topic_emotion_risk', 0)
+        
+        # Combined risk assessment: sentiment (60%) + emotion (40%)
+        combined_risk_score = (topic_negative_pct * 0.60) + (emotion_risk * 0.40)
+        
+        if combined_risk_score >= 50 or topic_negative_pct > 50:
             topic_risk = "High"
-        elif topic_negative_pct > 30:
+        elif combined_risk_score >= 30 or topic_negative_pct > 30:
             topic_risk = "Moderate"
     
     col1, col2 = st.columns([1, 2])
@@ -1026,12 +1217,17 @@ def main():
         current_topic = st.session_state.get('current_topic', 'Unknown')
         st.markdown(f"**Topic:** <span class='topic-tag'>{current_topic}</span>", unsafe_allow_html=True)
         
+        # Show combined risk breakdown
+        if 'topic_emotion_risk' in st.session_state:
+            emotion_risk_display = st.session_state['topic_emotion_risk']
+            st.markdown(f"<small style='color: #6c757d;'>Sentiment Risk: {topic_negative_pct:.1f}% | Emotion Risk: {emotion_risk_display:.1f}/100</small>", unsafe_allow_html=True)
+        
         if topic_risk == "High":
             st.markdown("<br><div class='decision-gate action-required'>⚠️ ACTION REQUIRED</div>", unsafe_allow_html=True)
-            st.markdown("<br>Topic shows high negative sentiment. Immediate intervention recommended.")
+            st.markdown("<br>Topic shows high negative sentiment and/or emotional intensity. Immediate intervention recommended.")
         elif topic_risk == "Moderate":
             st.markdown("<br><div class='decision-gate monitor' style='background-color: #ffc107; color: #1a1a2e;'>MONITOR & ACT</div>", unsafe_allow_html=True)
-            st.markdown("<br>Topic shows moderate concern. Proactive engagement advised.")
+            st.markdown("<br>Topic shows moderate concern or mixed emotions. Proactive engagement advised.")
         else:
             st.markdown("<br><div class='decision-gate monitor'>✅ MONITOR</div>", unsafe_allow_html=True)
             st.markdown("<br>Topic sentiment is healthy. Continue monitoring.")
