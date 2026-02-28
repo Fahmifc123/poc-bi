@@ -1129,40 +1129,134 @@ def main():
         st.info("No topic data available. Please ensure 'final_topic' column exists from Colab clustering.")
 
     # =============================================================================
-    # SECTION 4 – SPIKE & RISK ENGINE
+    # SECTION 4 – SPIKE & RISK ENGINE (Topic-Specific)
     # =============================================================================
     st.markdown("<div class='section-header'>⚠️ Spike & Risk Engine</div>", unsafe_allow_html=True)
+    
+    # Get selected topic from Topic Analysis section
+    selected_topic_for_risk = st.session_state.get('current_topic', None)
+    
+    # Calculate topic-specific risk metrics if a topic is selected
+    topic_risk_data = None
+    if selected_topic_for_risk and selected_topic_for_risk != 'All Topics' and 'final_topic' in df_filtered.columns:
+        # Filter data for the selected topic
+        df_topic = df_filtered[df_filtered['final_topic'] == selected_topic_for_risk].copy()
+        
+        if not df_topic.empty:
+            # Calculate topic-specific metrics
+            topic_total_data = len(df_topic)
+            topic_negative_ratio = (df_topic['final_sentiment'] == 'negative').mean() if 'final_sentiment' in df_topic.columns else 0
+            
+            # Calculate velocity (volume change rate)
+            if 'date' in df_topic.columns:
+                topic_daily = df_topic.groupby(df_topic['date'].dt.floor('D')).size()
+                if len(topic_daily) > 1:
+                    topic_velocity = topic_daily.pct_change().abs().mean()
+                    if pd.isna(topic_velocity):
+                        topic_velocity = 0
+                else:
+                    topic_velocity = 0
+            else:
+                topic_velocity = 0
+            
+            # Calculate Influencer Impact from followers and engagement for this topic
+            topic_influencer_impact = 0.5  # Default neutral
+            if 'influencer_score' in df_topic.columns:
+                topic_influencer_impact = df_topic['influencer_score'].mean()
+            elif 'followers' in df_topic.columns:
+                # Calculate from followers if influencer_score not pre-computed
+                followers_numeric = pd.to_numeric(df_topic['followers'], errors='coerce').fillna(0)
+                influencer_from_followers = np.log1p(followers_numeric)
+                
+                # Add engagement boost
+                engagement_total = 0
+                for col in ['like', 'share', 'comment', 'engagement']:
+                    if col in df_topic.columns:
+                        engagement_total += pd.to_numeric(df_topic[col], errors='coerce').fillna(0)
+                
+                influencer_score = influencer_from_followers + np.log1p(engagement_total) * 0.5
+                
+                # Normalize to 0-1
+                max_score = influencer_score.max()
+                if max_score > 0:
+                    topic_influencer_impact = (influencer_score / max_score).mean()
+            
+            # Calculate misinformation score
+            topic_misinformation = topic_negative_ratio * topic_velocity
+            
+            # Calculate final risk score
+            topic_risk_score = (
+                0.30 * topic_negative_ratio +
+                0.25 * topic_velocity +
+                0.25 * topic_influencer_impact +
+                0.20 * topic_misinformation
+            )
+            
+            topic_risk_data = {
+                'negative_ratio': topic_negative_ratio,
+                'velocity': topic_velocity,
+                'influencer_impact': topic_influencer_impact,
+                'misinformation_score': topic_misinformation,
+                'risk_score': topic_risk_score,
+                'total_data': topic_total_data
+            }
+    
+    # Fallback to daily metrics if no topic selected
+    if topic_risk_data is None and not daily_metrics.empty:
+        latest = daily_metrics.iloc[-1]
+        topic_risk_data = {
+            'negative_ratio': latest.get('negative_ratio', 0.3),
+            'velocity': latest.get('velocity', 0.1),
+            'influencer_impact': latest.get('influencer_impact', 0.5),
+            'misinformation_score': latest.get('misinformation_score', 0.1),
+            'risk_score': latest.get('risk_score', 0.3),
+            'total_data': len(daily_metrics)
+        }
     
     col1, col2 = st.columns([1, 2])
     
     with col1:
-        risk_color = "#dc3545" if current_risk > 0.7 else "#ffc107" if current_risk > 0.4 else "#28a745"
+        # Use topic-specific risk score
+        display_risk_score = topic_risk_data['risk_score'] if topic_risk_data else current_risk
+        risk_level_display, risk_class_display = get_risk_class(display_risk_score)
+        risk_color = "#dc3545" if display_risk_score > 0.7 else "#ffc107" if display_risk_score > 0.4 else "#28a745"
+        
         risk_html = f"""<div class='metric-card' style='text-align: center; padding: 2rem;'>
             <div class='metric-label'>Current Risk Score</div>
-            <div style='font-size: 3rem; font-weight: 700; color: {risk_color};'>{current_risk:.2f}</div>
-            <div style='margin-top: 1rem;'><span class='risk-badge {risk_class}'>{risk_level}</span></div>
-        </div>"""
+            <div style='font-size: 3rem; font-weight: 700; color: {risk_color};'>{display_risk_score:.2f}</div>
+            <div style='margin-top: 1rem;'><span class='risk-badge {risk_class_display}'>{risk_level_display}</span></div>
+        """
+        
+        # Show if it's topic-specific
+        if selected_topic_for_risk and selected_topic_for_risk != 'All Topics':
+            risk_html += f"<div style='font-size: 0.75rem; color: #6c757d; margin-top: 0.5rem;'>For: {selected_topic_for_risk[:40]}...</div>"
+        
+        risk_html += "</div>"
         st.markdown(risk_html, unsafe_allow_html=True)
         
-        decision = "Action Required" if current_risk > 0.6 else "Monitor"
-        decision_class = "action-required" if current_risk > 0.6 else "monitor"
+        decision = "Action Required" if display_risk_score > 0.6 else "Monitor"
+        decision_class = "action-required" if display_risk_score > 0.6 else "monitor"
         st.markdown(f"<div style='margin-top: 1rem;'><div class='decision-gate {decision_class}'>🔔 {decision}</div></div>", 
                     unsafe_allow_html=True)
     
     with col2:
         st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
         st.markdown("**Risk Breakdown**")
-        if not daily_metrics.empty and len(daily_metrics) > 0:
+        
+        # Show source indicator
+        if selected_topic_for_risk and selected_topic_for_risk != 'All Topics':
+            st.caption(f"📊 Calculated from selected topic data")
+        else:
+            st.caption(f"📊 Calculated from all filtered data")
+        
+        if topic_risk_data:
             try:
-                latest = daily_metrics.iloc[-1]
+                neg_ratio = topic_risk_data['negative_ratio']
+                velocity = topic_risk_data['velocity']
+                influencer = topic_risk_data['influencer_impact']
+                misinfo = topic_risk_data['misinformation_score']
                 
-                # Get values with fallbacks
-                neg_ratio = latest.get('negative_ratio', 0.3)
-                velocity = latest.get('velocity', 0.1)
-                influencer = latest.get('influencer_impact', 0.5)
-                misinfo = latest.get('misinformation_score', 0.1)
-                
-                # Calculate risk components
+                # Calculate risk components with weighted scores
                 risk_components = [
                     {"Component": "Negative Ratio", "Weight": "30%", "Value": f"{neg_ratio:.3f}", "Score": f"{neg_ratio * 0.30:.3f}"},
                     {"Component": "Velocity", "Weight": "25%", "Value": f"{velocity:.3f}", "Score": f"{velocity * 0.25:.3f}"},
@@ -1180,9 +1274,8 @@ def main():
                 fig_risk.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=220)
                 st.plotly_chart(fig_risk, use_container_width=True, config={'displayModeBar': False})
                 
-                # Show risk score
-                risk_score = latest.get('risk_score', neg_ratio * 0.30 + velocity * 0.25 + influencer * 0.25 + misinfo * 0.20)
-                st.caption(f"📊 Risk Score: {risk_score:.3f} | Data points: {len(daily_metrics)}")
+                # Show risk score and data points
+                st.caption(f"📊 Risk Score: {topic_risk_data['risk_score']:.3f} | Data points: {topic_risk_data['total_data']:,}")
                 
             except Exception as e:
                 st.error(f"Error displaying risk breakdown: {str(e)}")
