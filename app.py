@@ -1237,14 +1237,18 @@ def main():
                 ]
                 risk_df = pd.DataFrame(risk_components)
                 
-                fig_risk = go.Figure(data=[go.Table(
-                    header=dict(values=['<b>Component</b>', '<b>Weight</b>', '<b>Value</b>', '<b>Weighted</b>'],
-                                fill_color='#0066cc', align='left', font=dict(color='white', size=11)),
-                    cells=dict(values=[risk_df['Component'], risk_df['Weight'], risk_df['Value'], risk_df['Score']],
-                               fill_color=[['#f8f9fa', 'white'] * 3], align='left', font=dict(size=10))
-                )])
-                fig_risk.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=220)
-                st.plotly_chart(fig_risk, use_container_width=True, config={'displayModeBar': False})
+                # Use simpler DataFrame display for better compatibility
+                st.dataframe(
+                    risk_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Component": st.column_config.TextColumn("Component", width="medium"),
+                        "Weight": st.column_config.TextColumn("Weight", width="small"),
+                        "Value": st.column_config.TextColumn("Value", width="small"),
+                        "Score": st.column_config.TextColumn("Weighted", width="small"),
+                    }
+                )
                 
                 # Show risk score and data points
                 st.caption(f"📊 Risk Score: {topic_risk_data['risk_score']:.3f} | Data points: {topic_risk_data['total_data']:,}")
