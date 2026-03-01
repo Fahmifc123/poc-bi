@@ -324,11 +324,11 @@ class TestRiskDataInPrompt:
         user_msg = call_args[1]['messages'][1]['content']
 
         # Prompt harus mengandung semua komponen risk score
-        assert "Risk Score: 0.720" in user_msg
-        assert "Negative Ratio: 0.650" in user_msg
+        assert "Risk Score: 0.72" in user_msg
+        assert "Negative Ratio: 0.65" in user_msg
         assert "Velocity" in user_msg
-        assert "Influencer Impact: 0.800" in user_msg
-        assert "Misinformation Score: 0.250" in user_msg
+        assert "Influencer Impact: 0.80" in user_msg
+        assert "Misinformation Score: 0.25" in user_msg
         assert "150" in user_msg
 
     @patch('app.get_openai_client')

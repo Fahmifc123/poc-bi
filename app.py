@@ -549,11 +549,11 @@ def generate_topic_summary(df_topic, topic_name, negative_pct, risk_level, api_k
         misinfo = risk_data.get('misinformation_score', 0)
         risk_context = f"""
 Data Risk Score Engine:
-- Risk Score: {risk_score:.3f}
-- Negative Ratio: {neg_ratio:.3f} ({neg_ratio*100:.1f}%)
-- Velocity (perubahan volume): {velocity:.3f}
-- Influencer Impact: {influencer:.3f}
-- Misinformation Score: {misinfo:.3f}
+- Risk Score: {risk_score:.2f}
+- Negative Ratio: {neg_ratio:.2f} ({neg_ratio*100:.1f}%)
+- Velocity (perubahan volume): {velocity:.2f}
+- Influencer Impact: {influencer:.2f}
+- Misinformation Score: {misinfo:.2f}
 - Total data points: {risk_data.get('total_data', 0)}
 """
 
@@ -1262,6 +1262,7 @@ def main():
                     topic_velocity = topic_daily.pct_change().abs().mean()
                     if pd.isna(topic_velocity):
                         topic_velocity = 0
+                    topic_velocity = min(topic_velocity, 1.0)
                 else:
                     topic_velocity = 0
             else:
@@ -1289,8 +1290,8 @@ def main():
                 if max_score > 0:
                     topic_influencer_impact = (influencer_score / max_score).mean()
             
-            # Calculate misinformation score
-            topic_misinformation = topic_negative_ratio * topic_velocity
+            # Calculate misinformation score (clipped to 0-1)
+            topic_misinformation = min(topic_negative_ratio * topic_velocity, 1.0)
 
             # ONM: risk score dari sentiment + velocity saja
             if data_source == 'Online Media':
@@ -1308,6 +1309,9 @@ def main():
                     0.25 * topic_influencer_impact +
                     0.20 * topic_misinformation
                 )
+
+            # Clip final risk score to [0, 1]
+            topic_risk_score = min(max(topic_risk_score, 0.0), 1.0)
 
             topic_risk_data = {
                 'negative_ratio': topic_negative_ratio,
@@ -1513,39 +1517,39 @@ def main():
         with col2:
             # Show recommendation only when Generate button is clicked
             if st.session_state.get('show_recommendation', False) and st.session_state.get('topic_summary_for') == current_topic:
-                st.markdown("**Communication Strategy**")
+                st.markdown("**Strategi Komunikasi**")
                 if topic_risk == "High":
-                    st.markdown("**High Risk - Crisis Communication Protocol**")
-                    st.markdown("**Channel:** Official Press Conference + Social Media Campaign")
-                    st.markdown("**Tone:** Empathetic, Authoritative, Transparent")
-                    st.markdown("**Target Stakeholders:** General Public, Media, Financial Markets")
-                    st.markdown("**Key Messaging Points:**")
-                    st.markdown("- Acknowledge public concerns and provide assurance")
-                    st.markdown("- Communicate clear action plan with timeline")
-                    st.markdown("- Deploy senior spokesperson for credibility")
-                    st.markdown("- Actively monitor and counter misinformation")
+                    st.markdown("**Risiko Tinggi - Protokol Komunikasi Krisis**")
+                    st.markdown("**Kanal:** Konferensi Pers Resmi + Kampanye Media Sosial")
+                    st.markdown("**Nada:** Empatik, Otoritatif, Transparan")
+                    st.markdown("**Target Pemangku Kepentingan:** Masyarakat Umum, Media, Pasar Keuangan")
+                    st.markdown("**Poin Pesan Utama:**")
+                    st.markdown("- Mengakui kekhawatiran publik dan memberikan jaminan")
+                    st.markdown("- Mengomunikasikan rencana aksi yang jelas beserta timeline")
+                    st.markdown("- Menugaskan juru bicara senior untuk kredibilitas")
+                    st.markdown("- Memantau dan melawan misinformasi secara aktif")
                 elif topic_risk == "Moderate":
-                    st.markdown("**Moderate Risk - Proactive Strategy**")
-                    st.markdown("**Channel:** Social Media + Industry Webinars")
-                    st.markdown("**Tone:** Informative, Reassuring, Professional")
-                    st.markdown("**Target Stakeholders:** Banking Community, Policy Makers")
-                    st.markdown("**Key Messaging Points:**")
-                    st.markdown("- Increase transparency through educational content")
-                    st.markdown("- Engage key stakeholders in dialogue")
-                    st.markdown("- Clarify misconceptions with factual data")
-                    st.markdown("- Maintain consistent communication frequency")
+                    st.markdown("**Risiko Sedang - Strategi Proaktif**")
+                    st.markdown("**Kanal:** Media Sosial + Webinar Industri")
+                    st.markdown("**Nada:** Informatif, Menenangkan, Profesional")
+                    st.markdown("**Target Pemangku Kepentingan:** Komunitas Perbankan, Pembuat Kebijakan")
+                    st.markdown("**Poin Pesan Utama:**")
+                    st.markdown("- Meningkatkan transparansi melalui konten edukatif")
+                    st.markdown("- Melibatkan pemangku kepentingan utama dalam dialog")
+                    st.markdown("- Mengklarifikasi kesalahpahaman dengan data faktual")
+                    st.markdown("- Menjaga frekuensi komunikasi yang konsisten")
                 else:
-                    st.markdown("**Low Risk - Maintenance & Monitoring**")
-                    st.markdown("**Channel:** Regular Communication Channels")
-                    st.markdown("**Tone:** Professional, Consistent")
-                    st.markdown("**Target Stakeholders:** All Stakeholders")
-                    st.markdown("**Key Messaging Points:**")
-                    st.markdown("- Continue regular information dissemination")
-                    st.markdown("- Monitor early warning signals")
-                    st.markdown("- Maintain positive narrative momentum")
-                    st.markdown("- Prepare contingency communications")
+                    st.markdown("**Risiko Rendah - Pemeliharaan & Pemantauan**")
+                    st.markdown("**Kanal:** Kanal Komunikasi Reguler")
+                    st.markdown("**Nada:** Profesional, Konsisten")
+                    st.markdown("**Target Pemangku Kepentingan:** Semua Pemangku Kepentingan")
+                    st.markdown("**Poin Pesan Utama:**")
+                    st.markdown("- Melanjutkan penyebaran informasi secara rutin")
+                    st.markdown("- Memantau sinyal peringatan dini")
+                    st.markdown("- Mempertahankan momentum narasi positif")
+                    st.markdown("- Menyiapkan komunikasi kontingensi")
             else:
-                st.info("Click 'Generate Recommendation' to see the communication strategy.")
+                st.info("Klik 'Generate Recommendation' untuk melihat strategi komunikasi.")
 
             # Show follow-up status if marked
             if st.session_state.get('followup_marked', False):
