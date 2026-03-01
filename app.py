@@ -786,12 +786,15 @@ def main():
     if selected_topic != 'All Topics' and 'final_topic' in df_filtered.columns:
         df_filtered = df_filtered[df_filtered['final_topic'] == selected_topic]
 
-    if len(date_range) == 2:
-        df_filtered = df_filtered[
-            (df_filtered['date'].dt.date >= date_range[0]) &
-            (df_filtered['date'].dt.date <= date_range[1])
-        ]
-    
+    if len(date_range) != 2:
+        st.info("Silakan pilih end date untuk melanjutkan.")
+        st.stop()
+
+    df_filtered = df_filtered[
+        (df_filtered['date'].dt.date >= date_range[0]) &
+        (df_filtered['date'].dt.date <= date_range[1])
+    ]
+
     # Show filter status with cache info
     st.caption(f"✓ Filters cached | Data Source: {data_source} | Topic: {selected_topic} | Date: {date_range[0]} to {date_range[1]}")
 
@@ -841,7 +844,7 @@ def main():
     # =============================================================================
     # SECTION 1 – OVERVIEW ANALYTICS
     # =============================================================================
-    st.markdown("<div class='section-header'>📊 Overview Analytics</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-header'>Overview Analytics</div>", unsafe_allow_html=True)
     
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
@@ -876,7 +879,7 @@ def main():
         # Spike explanation tooltip-style
         st.markdown(f"""
         <small style='color: #6c757d; font-size: 0.7rem;'>
-        ℹ️ Spike detected when negative sentiment {'>'} mean ({mean_neg:.1%}) + std dev ({std_neg:.1%}). 
+        Spike detected when negative sentiment {'>'} mean ({mean_neg:.1%}) + std dev ({std_neg:.1%}). 
         Indicates unusual surge in negative conversations requiring attention.
         </small>
         """, unsafe_allow_html=True)
@@ -994,7 +997,7 @@ def main():
             hidden_pct = (hidden_total / len(emotion_data) * 100) if len(emotion_data) > 0 else 0
             
             if hidden_total > 0:
-                st.markdown(f"<small style='color: #6c757d;'>ℹ️ Neutral/No-Emotion: {hidden_total:,} ({hidden_pct:.1f}% of data) - Hidden for clarity</small>", unsafe_allow_html=True)
+                st.markdown(f"<small style='color: #6c757d;'>Neutral/No-Emotion: {hidden_total:,} ({hidden_pct:.1f}% of data) - Hidden for clarity</small>", unsafe_allow_html=True)
         
     
     # =============================================================================
@@ -1045,7 +1048,7 @@ def main():
                 st.plotly_chart(fig_topics, use_container_width=True, config={'displayModeBar': False})
 
             with metrics_col:
-                st.markdown("**📊 Topic Metrics**")
+                st.markdown("**Topic Metrics**")
                 
                 current_topic = selected_topic_detail if selected_topic_detail != 'All Topics' else topic_stats.iloc[0]['topic']
                 topic_data = topic_stats[topic_stats['topic'] == current_topic] if selected_topic_detail != 'All Topics' else topic_stats.iloc[0:1]
@@ -1071,8 +1074,8 @@ def main():
                         joy_pct = (emotion_counts.get('joy', 0) / total_emotion * 100) if total_emotion > 0 else 0
                         trust_pct = (emotion_counts.get('trust', 0) / total_emotion * 100) if total_emotion > 0 else 0
 
-                st.markdown(f"<br><strong>📈 Total Data:</strong> {topic_volume:,}", unsafe_allow_html=True)
-                st.markdown(f"<strong>📉 Negative:</strong> {topic_negative_pct:.1f}%", unsafe_allow_html=True)
+                st.markdown(f"<br><strong>Total Data:</strong> {topic_volume:,}", unsafe_allow_html=True)
+                st.markdown(f"<strong>Negative:</strong> {topic_negative_pct:.1f}%", unsafe_allow_html=True)
 
                 # Emotion cards hanya untuk Social Media & All (ONM tidak punya emotion)
                 if data_source != 'Online Media':
@@ -1102,13 +1105,13 @@ def main():
                     """
                     st.markdown(emotion_html, unsafe_allow_html=True)
                 
-                st.markdown(f"<br><strong>⚖️ Risk:</strong>", unsafe_allow_html=True)
+                st.markdown(f"<br><strong>Risk:</strong>", unsafe_allow_html=True)
                 if topic_negative_pct > 50:
                     st.markdown("<span class='spike-alert'>High Risk</span>", unsafe_allow_html=True)
                 elif topic_negative_pct > 30:
                     st.markdown("<span style='background-color: #ffc107; color: #1a1a2e; padding: 0.4rem 0.9rem; border-radius: 20px;'>Moderate Risk</span>", unsafe_allow_html=True)
                 else:
-                    st.markdown("<span class='spike-normal'>✅ Low Risk</span>", unsafe_allow_html=True)
+                    st.markdown("<span class='spike-normal'>Low Risk</span>", unsafe_allow_html=True)
             
             # Reset recommendation jika topic berubah
             prev_topic = st.session_state.get('current_topic', None)
@@ -1129,7 +1132,7 @@ def main():
     # =============================================================================
     # SECTION 4 – SPIKE & RISK ENGINE (Topic-Specific)
     # =============================================================================
-    st.markdown("<div class='section-header'>⚠️ Spike & Risk Engine</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-header'>Spike & Risk Engine</div>", unsafe_allow_html=True)
     
     # Get selected topic from Topic Analysis section
     selected_topic_for_risk = st.session_state.get('current_topic', None)
@@ -1243,7 +1246,7 @@ def main():
         
         decision = "Action Required" if display_risk_score > 0.6 else "Monitor"
         decision_class = "action-required" if display_risk_score > 0.6 else "monitor"
-        st.markdown(f"<div style='margin-top: 1rem;'><div class='decision-gate {decision_class}'>🔔 {decision}</div></div>", 
+        st.markdown(f"<div style='margin-top: 1rem;'><div class='decision-gate {decision_class}'>{decision}</div></div>",
                     unsafe_allow_html=True)
     
     with col2:
@@ -1251,9 +1254,9 @@ def main():
         
         # Show source indicator
         if selected_topic_for_risk and selected_topic_for_risk != 'All Topics':
-            st.caption(f"📊 Calculated from selected topic data")
+            st.caption(f"Calculated from selected topic data")
         else:
-            st.caption(f"📊 Calculated from all filtered data")
+            st.caption(f"Calculated from all filtered data")
         
         if topic_risk_data:
             try:
@@ -1292,7 +1295,7 @@ def main():
                 )
 
                 # Show risk score and data points
-                st.caption(f"📊 Risk Score: {topic_risk_data['risk_score']:.3f} | Data points: {topic_risk_data['total_data']:,}")
+                st.caption(f"Risk Score: {topic_risk_data['risk_score']:.3f} | Data points: {topic_risk_data['total_data']:,}")
 
             except Exception as err:
                 st.error(f"Error displaying risk breakdown: {str(err)}")
@@ -1343,7 +1346,7 @@ def main():
     col1, col2 = st.columns([1, 2])
     
     with col1:
-        st.markdown("**🎯 Topic Risk Assessment**")
+        st.markdown("**Topic Risk Assessment**")
         
         current_topic = st.session_state.get('current_topic', 'Unknown')
         st.markdown(f"<span style='font-size: 0.9rem;'><strong>Topic:</strong> <span class='topic-tag'>{current_topic}</span></span>", unsafe_allow_html=True)
@@ -1357,29 +1360,29 @@ def main():
         
         # Risk status without explanatory text
         if topic_risk == "High":
-            st.markdown("<br><div class='decision-gate action-required'>⚠️ ACTION REQUIRED</div>", unsafe_allow_html=True)
+            st.markdown("<br><div class='decision-gate action-required'>ACTION REQUIRED</div>", unsafe_allow_html=True)
         elif topic_risk == "Moderate":
             st.markdown("<br><div class='decision-gate monitor' style='background-color: #ffc107; color: #1a1a2e;'>MONITOR & ACT</div>", unsafe_allow_html=True)
         else:
-            st.markdown("<br><div class='decision-gate monitor'>✅ MONITOR</div>", unsafe_allow_html=True)
+            st.markdown("<br><div class='decision-gate monitor'>MONITOR</div>", unsafe_allow_html=True)
         
         # Two action buttons
         st.markdown("<br>", unsafe_allow_html=True)
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
-            followup_clicked = st.button("📌 Follow-up as Issue", type="primary", use_container_width=True, key="followup_btn")
+            followup_clicked = st.button("Follow-up as Issue", type="primary", use_container_width=True, key="followup_btn")
             if followup_clicked:
-                st.success("✅ Topic marked for follow-up as high-impact issue")
+                st.success("Topic marked for follow-up as high-impact issue")
                 st.session_state['followup_marked'] = True
                 st.session_state['followup_topic'] = current_topic
         
         with col_btn2:
-            generate_clicked = st.button("💡 Generate Recommendation", type="secondary", use_container_width=True, key="generate_btn")
+            generate_clicked = st.button("Generate Recommendation", type="secondary", use_container_width=True, key="generate_btn")
             if generate_clicked:
                 st.session_state['show_recommendation'] = True
 
     with col2:
-        st.markdown("**📋 Communication Strategy**")
+        st.markdown("**Communication Strategy**")
         
         # Show recommendation only when Generate button is clicked
         if st.session_state.get('show_recommendation', False):
@@ -1414,11 +1417,11 @@ def main():
                 st.markdown("• Maintain positive narrative momentum")
                 st.markdown("• Prepare contingency communications")
         else:
-            st.info("💡 Click 'Generate Recommendation' button to view communication strategy")
+            st.info("Click 'Generate Recommendation' button to view communication strategy")
         
         # Show follow-up status if marked
         if st.session_state.get('followup_marked', False):
-            st.markdown(f"<br><div class='info-box'><strong>📌 Follow-up Status:</strong> Topic '{st.session_state.get('followup_topic', current_topic)}' marked for BI issue tracking.</div>", unsafe_allow_html=True)
+            st.markdown(f"<br><div class='info-box'><strong>Follow-up Status:</strong> Topic '{st.session_state.get('followup_topic', current_topic)}' marked for BI issue tracking.</div>", unsafe_allow_html=True)
     
 
 if __name__ == "__main__":
