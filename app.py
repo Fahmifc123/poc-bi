@@ -22,6 +22,10 @@ from dotenv import load_dotenv
 # Load .env (lokal). Di server, set OPENAI_API_KEY sebagai env var sistem.
 load_dotenv()
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+
+# Topics to hide from all dropdowns and charts
+HIDDEN_TOPICS = {'other-topic', 'tidak ada topic / cluster -1 (unclustered)'}
+
 # =============================================================================
 # PAGE CONFIGURATION
 # =============================================================================
@@ -428,7 +432,7 @@ def extract_topics_llm_batch(contents, api_key=None):
             status_text.text(f"Processing content {i+1}/{len(contents)}...")
             
             response = client.chat.completions.create(
-                model="gpt-4.1-nano",
+                model="gpt-4.1-mini",
                 messages=[
                     {"role": "system", "content": "You are an economic policy analyst for Bank Indonesia. Extract the main policy-related topic from content. Respond in JSON format with 'topic_label' (max 5 words) and 'explanation' fields."},
                     {"role": "user", "content": f"Content: {content}"}
@@ -601,7 +605,7 @@ def generate_recommendation_llm(dominant_topic, negative_ratio, risk_level, narr
     
     try:
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": "You are a strategic communication advisor for Bank Indonesia (Central Bank of Indonesia). Generate communication strategy recommendations in JSON format."},
                 {"role": "user", "content": f"""Given:
@@ -748,16 +752,16 @@ def main():
         # Topic filter - will be populated after data load
         topic_options = ['All Topics']
         if data_source == 'Social Media' and 'final_topic' in df_sosmed.columns:
-            topic_options.extend(sorted(df_sosmed['final_topic'].dropna().unique().tolist()))
+            topic_options.extend(sorted([t for t in df_sosmed['final_topic'].dropna().unique() if t not in HIDDEN_TOPICS]))
         elif data_source == 'Online Media' and 'final_topic' in df_onm.columns:
-            topic_options.extend(sorted(df_onm['final_topic'].dropna().unique().tolist()))
+            topic_options.extend(sorted([t for t in df_onm['final_topic'].dropna().unique() if t not in HIDDEN_TOPICS]))
         elif data_source == 'All':
             all_topics = set()
             if 'final_topic' in df_sosmed.columns:
                 all_topics.update(df_sosmed['final_topic'].dropna().unique())
             if 'final_topic' in df_onm.columns:
                 all_topics.update(df_onm['final_topic'].dropna().unique())
-            topic_options.extend(sorted(all_topics))
+            topic_options.extend(sorted(all_topics - HIDDEN_TOPICS))
         
         # Initialize session state for topic if not exists
         if 'filter_topic' not in st.session_state:
@@ -1011,6 +1015,7 @@ def main():
             'final_sentiment': lambda x: (x == 'negative').mean()
         }).reset_index()
         topic_stats.columns = ['topic', 'volume', 'negative_ratio']
+        topic_stats = topic_stats[~topic_stats['topic'].isin(HIDDEN_TOPICS)]
         topic_stats = topic_stats.sort_values('volume', ascending=False)
         
         # Top N selector for pie chart
