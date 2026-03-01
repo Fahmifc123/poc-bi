@@ -291,3 +291,89 @@ class TestPromptFormat:
         call_args = mock_client.chat.completions.create.call_args
         system_msg = call_args[1]['messages'][0]['content']
         assert "Bank Indonesia" in system_msg
+
+
+# ─────────────────────────────────────────────
+# TEST: Risk data included in prompt
+# ─────────────────────────────────────────────
+class TestRiskDataInPrompt:
+    @patch('app.get_openai_client')
+    def test_risk_data_included_when_provided(self, mock_get_client):
+        """Saat risk_data dikirim, prompt harus mengandung data risk score."""
+        df = make_topic_df(5)
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Summary"
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_get_client.return_value = mock_client
+
+        risk_data = {
+            'risk_score': 0.72,
+            'negative_ratio': 0.65,
+            'velocity': 0.30,
+            'influencer_impact': 0.80,
+            'misinformation_score': 0.25,
+            'total_data': 150,
+        }
+
+        generate_topic_summary(df, "Test", 65.0, "High", api_key="test", risk_data=risk_data)
+
+        call_args = mock_client.chat.completions.create.call_args
+        user_msg = call_args[1]['messages'][1]['content']
+
+        # Prompt harus mengandung semua komponen risk score
+        assert "Risk Score: 0.720" in user_msg
+        assert "Negative Ratio: 0.650" in user_msg
+        assert "Velocity" in user_msg
+        assert "Influencer Impact: 0.800" in user_msg
+        assert "Misinformation Score: 0.250" in user_msg
+        assert "150" in user_msg
+
+    @patch('app.get_openai_client')
+    def test_no_risk_data_still_works(self, mock_get_client):
+        """Tanpa risk_data, prompt tetap jalan tanpa crash."""
+        df = make_topic_df(5)
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Summary without risk"
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_get_client.return_value = mock_client
+
+        summary, error = generate_topic_summary(df, "Test", 10.0, "Low", api_key="test")
+        assert summary == "Summary without risk"
+        assert error is None
+
+        # Prompt tidak mengandung "Risk Score:" karena risk_data=None
+        call_args = mock_client.chat.completions.create.call_args
+        user_msg = call_args[1]['messages'][1]['content']
+        assert "Risk Score:" not in user_msg
+
+    @patch('app.get_openai_client')
+    def test_prompt_references_risk_score_in_explanation(self, mock_get_client):
+        """Prompt harus minta LLM referensikan angka risk score saat menjelaskan risiko."""
+        df = make_topic_df(5)
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        risk_data = {
+            'risk_score': 0.45,
+            'negative_ratio': 0.35,
+            'velocity': 0.20,
+            'influencer_impact': 0.50,
+            'misinformation_score': 0.10,
+            'total_data': 80,
+        }
+
+        generate_topic_summary(df, "Test", 35.0, "Moderate", api_key="test", risk_data=risk_data)
+
+        call_args = mock_client.chat.completions.create.call_args
+        user_msg = call_args[1]['messages'][1]['content']
+
+        # Prompt harus instruksikan LLM untuk referensikan data risk score
+        assert "risk score" in user_msg.lower()

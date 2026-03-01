@@ -493,7 +493,7 @@ def extract_single_topic_fallback(content):
 # =============================================================================
 # TOPIC SUMMARY (LLM-POWERED)
 # =============================================================================
-def generate_topic_summary(df_topic, topic_name, negative_pct, risk_level, api_key=None):
+def generate_topic_summary(df_topic, topic_name, negative_pct, risk_level, api_key=None, risk_data=None):
     """Generate a summary of topic contents using GPT-4.1-mini.
 
     Samples contents from the topic, limits to ~1000 tokens input,
@@ -539,20 +539,38 @@ def generate_topic_summary(df_topic, topic_name, negative_pct, risk_level, api_k
 
     contents_text = "\n---\n".join(sampled)
 
+    # Build risk score context from Spike & Risk Engine
+    risk_context = ""
+    if risk_data:
+        risk_score = risk_data.get('risk_score', 0)
+        neg_ratio = risk_data.get('negative_ratio', 0)
+        velocity = risk_data.get('velocity', 0)
+        influencer = risk_data.get('influencer_impact', 0)
+        misinfo = risk_data.get('misinformation_score', 0)
+        risk_context = f"""
+Data Risk Score Engine:
+- Risk Score: {risk_score:.3f}
+- Negative Ratio: {neg_ratio:.3f} ({neg_ratio*100:.1f}%)
+- Velocity (perubahan volume): {velocity:.3f}
+- Influencer Impact: {influencer:.3f}
+- Misinformation Score: {misinfo:.3f}
+- Total data points: {risk_data.get('total_data', 0)}
+"""
+
     prompt = f"""Kamu adalah analis komunikasi publik Bank Indonesia.
 
 Topik: "{topic_name}"
 Sentimen negatif: {negative_pct:.1f}%
 Risk level: {risk_level}
 Jumlah sampel konten: {len(sampled)} dari {len(contents)} total
-
+{risk_context}
 Berikut adalah sampel konten dari topik ini:
 {contents_text}
 
 Berikan summary dalam format berikut (dalam Bahasa Indonesia):
 1. **Ringkasan Topik**: Apa yang dibahas dalam topik ini? (2-3 kalimat)
 2. **Isu Utama**: Apa isu/keluhan/pembahasan utama masyarakat? (bullet points, max 4)
-3. **Mengapa Risiko {risk_level}**: Jelaskan kenapa topik ini bisa menjadi risiko {risk_level.lower()} bagi Bank Indonesia (1-2 kalimat)
+3. **Mengapa Risiko {risk_level}**: Berdasarkan data risk score di atas, jelaskan kenapa topik ini menjadi risiko {risk_level.lower()} bagi Bank Indonesia (1-2 kalimat, referensikan angka risk score)
 4. **Sentimen Publik**: Bagaimana sentimen dan reaksi masyarakat secara umum? (1-2 kalimat)
 """
 
@@ -1337,7 +1355,27 @@ def main():
         decision_class = "action-required" if display_risk_score > 0.6 else "monitor"
         st.markdown(f"<div style='margin-top: 1rem;'><div class='decision-gate {decision_class}'>{decision}</div></div>",
                     unsafe_allow_html=True)
-    
+
+        # Generate Summary button - below Action Required / Monitor
+        st.markdown("<br>", unsafe_allow_html=True)
+        current_topic = st.session_state.get('current_topic', 'Unknown')
+        summary_clicked = st.button("Generate Summary", type="secondary", use_container_width=True, key="summary_btn")
+        if summary_clicked:
+            with st.spinner("Menganalisis konten topik..."):
+                df_topic_for_summary = df_filtered[df_filtered['final_topic'] == current_topic] if 'final_topic' in df_filtered.columns else pd.DataFrame()
+                topic_negative_pct_for_summary = st.session_state.get('topic_negative_pct', 0)
+                risk_level_for_summary = risk_level_display
+                summary, error = generate_topic_summary(
+                    df_topic_for_summary, current_topic, topic_negative_pct_for_summary, risk_level_for_summary,
+                    api_key=OPENAI_API_KEY, risk_data=topic_risk_data
+                )
+                if summary:
+                    st.session_state['topic_summary'] = summary
+                    st.session_state['topic_summary_for'] = current_topic
+                    st.rerun()
+                else:
+                    st.error(error)
+
     with col2:
         st.markdown("**Risk Breakdown**")
         
@@ -1409,77 +1447,61 @@ def main():
             risk_df = pd.DataFrame(risk_components)
             st.table(risk_df)
 
-    # =============================================================================
-    # SECTION 5 – DECISION TRIGGER & RECOMMENDATION
-    # =============================================================================
-    st.markdown("<div class='section-header'>Pemicu Keputusan & Rekomendasi AI</div>", unsafe_allow_html=True)
-    
-    # Decision trigger based on selected topic
-    topic_risk = "Low"
-    if 'topic_negative_pct' in st.session_state:
-        topic_negative_pct = st.session_state['topic_negative_pct']
-
-        if data_source == 'Online Media':
-            # ONM: risk dari sentiment saja (tanpa emotion)
-            combined_risk_score = topic_negative_pct
-        else:
-            # Social Media / All: sentiment (60%) + emotion (40%)
-            emotion_risk = st.session_state.get('topic_emotion_risk', 0)
-            combined_risk_score = (topic_negative_pct * 0.60) + (emotion_risk * 0.40)
-
-        if combined_risk_score >= 50 or topic_negative_pct > 50:
-            topic_risk = "High"
-        elif combined_risk_score >= 30 or topic_negative_pct > 30:
-            topic_risk = "Moderate"
-    
-    col1, col2 = st.columns([1, 2])
-    
-    with col1:
-        st.markdown("**Penilaian Risiko Topik**")
-
+        # Show summary below risk breakdown if generated
         current_topic = st.session_state.get('current_topic', 'Unknown')
-        st.markdown(f"<span style='font-size: 0.9rem;'><strong>Topik:</strong> <span class='topic-tag'>{current_topic}</span></span>", unsafe_allow_html=True)
-
-        # Show risk breakdown
-        if data_source == 'Online Media':
-            st.markdown(f"<small style='color: #6c757d;'>Risiko Sentimen: {topic_negative_pct:.1f}%</small>", unsafe_allow_html=True)
-        elif 'topic_emotion_risk' in st.session_state:
-            emotion_risk_display = st.session_state['topic_emotion_risk']
-            st.markdown(f"<small style='color: #6c757d;'>Risiko Sentimen: {topic_negative_pct:.1f}% | Risiko Emosi: {emotion_risk_display:.1f}/100</small>", unsafe_allow_html=True)
-
-        # Risk status
-        if topic_risk == "High":
-            st.markdown("<br><div class='decision-gate action-required'>PERLU TINDAKAN</div>", unsafe_allow_html=True)
-        elif topic_risk == "Moderate":
-            st.markdown("<br><div class='decision-gate monitor' style='background-color: #ffc107; color: #1a1a2e;'>PANTAU & TINDAK</div>", unsafe_allow_html=True)
-        else:
-            st.markdown("<br><div class='decision-gate monitor'>PANTAU</div>", unsafe_allow_html=True)
-        
-        # Generate Summary button (must be done before Follow-up / Recommendation)
-        st.markdown("<br>", unsafe_allow_html=True)
-        summary_clicked = st.button("Generate Summary", type="secondary", use_container_width=True, key="summary_btn")
-        if summary_clicked:
-            with st.spinner("Menganalisis konten topik..."):
-                df_topic_for_summary = df_filtered[df_filtered['final_topic'] == current_topic] if 'final_topic' in df_filtered.columns else pd.DataFrame()
-                summary, error = generate_topic_summary(
-                    df_topic_for_summary, current_topic, topic_negative_pct, topic_risk,
-                    api_key=OPENAI_API_KEY
-                )
-                if summary:
-                    st.session_state['topic_summary'] = summary
-                    st.session_state['topic_summary_for'] = current_topic
-                    st.rerun()
-                else:
-                    st.error(error)
-
-        # Action buttons (only show after summary is generated)
         if st.session_state.get('topic_summary_for') == current_topic and st.session_state.get('topic_summary'):
+            st.markdown("---")
+            st.markdown("**Topic Summary**")
+            st.markdown(st.session_state['topic_summary'])
+
+    # =============================================================================
+    # SECTION 5 – DECISION TRIGGER & RECOMMENDATION (only after summary)
+    # =============================================================================
+    current_topic = st.session_state.get('current_topic', 'Unknown')
+    if st.session_state.get('topic_summary_for') == current_topic and st.session_state.get('topic_summary'):
+        st.markdown("<div class='section-header'>Decision Trigger & AI Recommendation</div>", unsafe_allow_html=True)
+
+        # Decision trigger based on selected topic
+        topic_risk = "Low"
+        if 'topic_negative_pct' in st.session_state:
+            topic_negative_pct = st.session_state['topic_negative_pct']
+
+            if data_source == 'Online Media':
+                combined_risk_score = topic_negative_pct
+            else:
+                emotion_risk = st.session_state.get('topic_emotion_risk', 0)
+                combined_risk_score = (topic_negative_pct * 0.60) + (emotion_risk * 0.40)
+
+            if combined_risk_score >= 50 or topic_negative_pct > 50:
+                topic_risk = "High"
+            elif combined_risk_score >= 30 or topic_negative_pct > 30:
+                topic_risk = "Moderate"
+
+        col1, col2 = st.columns([1, 2])
+
+        with col1:
+            st.markdown("**Topic Risk Assessment**")
+            st.markdown(f"<span style='font-size: 0.9rem;'><strong>Topic:</strong> <span class='topic-tag'>{current_topic}</span></span>", unsafe_allow_html=True)
+
+            if data_source == 'Online Media':
+                st.markdown(f"<small style='color: #6c757d;'>Sentiment Risk: {topic_negative_pct:.1f}%</small>", unsafe_allow_html=True)
+            elif 'topic_emotion_risk' in st.session_state:
+                emotion_risk_display = st.session_state['topic_emotion_risk']
+                st.markdown(f"<small style='color: #6c757d;'>Sentiment Risk: {topic_negative_pct:.1f}% | Emotion Risk: {emotion_risk_display:.1f}/100</small>", unsafe_allow_html=True)
+
+            if topic_risk == "High":
+                st.markdown("<br><div class='decision-gate action-required'>ACTION REQUIRED</div>", unsafe_allow_html=True)
+            elif topic_risk == "Moderate":
+                st.markdown("<br><div class='decision-gate monitor' style='background-color: #ffc107; color: #1a1a2e;'>MONITOR & ACT</div>", unsafe_allow_html=True)
+            else:
+                st.markdown("<br><div class='decision-gate monitor'>MONITOR</div>", unsafe_allow_html=True)
+
             st.markdown("<br>", unsafe_allow_html=True)
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
                 followup_clicked = st.button("Follow-up as Issue", type="primary", use_container_width=True, key="followup_btn")
                 if followup_clicked:
-                    st.success("Topik ditandai untuk tindak lanjut sebagai isu berdampak tinggi")
+                    st.success("Topic marked for follow-up as high-impact issue")
                     st.session_state['followup_marked'] = True
                     st.session_state['followup_topic'] = current_topic
 
@@ -1488,52 +1510,46 @@ def main():
                 if generate_clicked:
                     st.session_state['show_recommendation'] = True
 
-    with col2:
-        # Show summary if generated
-        if st.session_state.get('topic_summary_for') == current_topic and st.session_state.get('topic_summary'):
-            st.markdown("**Ringkasan Topik**")
-            st.markdown(st.session_state['topic_summary'])
-            st.markdown("---")
-
-        # Show recommendation only when Generate button is clicked (after summary)
-        if st.session_state.get('show_recommendation', False) and st.session_state.get('topic_summary_for') == current_topic:
-            st.markdown("**Strategi Komunikasi**")
-            if topic_risk == "High":
-                st.markdown("**Risiko Tinggi - Protokol Komunikasi Krisis**")
-                st.markdown("**Kanal:** Konferensi Pers Resmi + Kampanye Media Sosial")
-                st.markdown("**Nada:** Empatik, Otoritatif, Transparan")
-                st.markdown("**Target Pemangku Kepentingan:** Masyarakat Umum, Media, Pasar Keuangan")
-                st.markdown("**Poin Pesan Utama:**")
-                st.markdown("- Akui kekhawatiran publik dan berikan jaminan")
-                st.markdown("- Sampaikan rencana aksi yang jelas beserta timeline")
-                st.markdown("- Tampilkan juru bicara senior untuk kredibilitas")
-                st.markdown("- Pantau dan tanggapi misinformasi secara aktif")
-            elif topic_risk == "Moderate":
-                st.markdown("**Risiko Sedang - Strategi Proaktif**")
-                st.markdown("**Kanal:** Media Sosial + Webinar Industri")
-                st.markdown("**Nada:** Informatif, Menenangkan, Profesional")
-                st.markdown("**Target Pemangku Kepentingan:** Komunitas Perbankan, Pembuat Kebijakan")
-                st.markdown("**Poin Pesan Utama:**")
-                st.markdown("- Tingkatkan transparansi melalui konten edukatif")
-                st.markdown("- Libatkan pemangku kepentingan utama dalam dialog")
-                st.markdown("- Klarifikasi kesalahpahaman dengan data faktual")
-                st.markdown("- Jaga konsistensi frekuensi komunikasi")
+        with col2:
+            # Show recommendation only when Generate button is clicked
+            if st.session_state.get('show_recommendation', False) and st.session_state.get('topic_summary_for') == current_topic:
+                st.markdown("**Communication Strategy**")
+                if topic_risk == "High":
+                    st.markdown("**High Risk - Crisis Communication Protocol**")
+                    st.markdown("**Channel:** Official Press Conference + Social Media Campaign")
+                    st.markdown("**Tone:** Empathetic, Authoritative, Transparent")
+                    st.markdown("**Target Stakeholders:** General Public, Media, Financial Markets")
+                    st.markdown("**Key Messaging Points:**")
+                    st.markdown("- Acknowledge public concerns and provide assurance")
+                    st.markdown("- Communicate clear action plan with timeline")
+                    st.markdown("- Deploy senior spokesperson for credibility")
+                    st.markdown("- Actively monitor and counter misinformation")
+                elif topic_risk == "Moderate":
+                    st.markdown("**Moderate Risk - Proactive Strategy**")
+                    st.markdown("**Channel:** Social Media + Industry Webinars")
+                    st.markdown("**Tone:** Informative, Reassuring, Professional")
+                    st.markdown("**Target Stakeholders:** Banking Community, Policy Makers")
+                    st.markdown("**Key Messaging Points:**")
+                    st.markdown("- Increase transparency through educational content")
+                    st.markdown("- Engage key stakeholders in dialogue")
+                    st.markdown("- Clarify misconceptions with factual data")
+                    st.markdown("- Maintain consistent communication frequency")
+                else:
+                    st.markdown("**Low Risk - Maintenance & Monitoring**")
+                    st.markdown("**Channel:** Regular Communication Channels")
+                    st.markdown("**Tone:** Professional, Consistent")
+                    st.markdown("**Target Stakeholders:** All Stakeholders")
+                    st.markdown("**Key Messaging Points:**")
+                    st.markdown("- Continue regular information dissemination")
+                    st.markdown("- Monitor early warning signals")
+                    st.markdown("- Maintain positive narrative momentum")
+                    st.markdown("- Prepare contingency communications")
             else:
-                st.markdown("**Risiko Rendah - Pemeliharaan & Pemantauan**")
-                st.markdown("**Kanal:** Kanal Komunikasi Reguler")
-                st.markdown("**Nada:** Profesional, Konsisten")
-                st.markdown("**Target Pemangku Kepentingan:** Seluruh Pemangku Kepentingan")
-                st.markdown("**Poin Pesan Utama:**")
-                st.markdown("- Lanjutkan penyebaran informasi secara berkala")
-                st.markdown("- Pantau sinyal peringatan dini")
-                st.markdown("- Pertahankan momentum narasi positif")
-                st.markdown("- Siapkan komunikasi kontingensi")
-        elif not st.session_state.get('topic_summary'):
-            st.info("Klik 'Generate Summary' untuk menganalisis konten topik sebelum membuat rekomendasi.")
+                st.info("Click 'Generate Recommendation' to see the communication strategy.")
 
-        # Show follow-up status if marked
-        if st.session_state.get('followup_marked', False):
-            st.markdown(f"<br><div class='info-box'><strong>Status Tindak Lanjut:</strong> Topik '{st.session_state.get('followup_topic', current_topic)}' ditandai untuk pelacakan isu BI.</div>", unsafe_allow_html=True)
+            # Show follow-up status if marked
+            if st.session_state.get('followup_marked', False):
+                st.markdown(f"<br><div class='info-box'><strong>Follow-up Status:</strong> Topic '{st.session_state.get('followup_topic', current_topic)}' marked for BI issue tracking.</div>", unsafe_allow_html=True)
     
 
 if __name__ == "__main__":
