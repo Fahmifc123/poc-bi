@@ -1399,16 +1399,16 @@ def main():
                 # ONM: tampilkan Sentiment + Velocity
                 if data_source == 'Online Media':
                     risk_components = [
-                        {"Component": "Negative Ratio (Sentiment)", "Weight": "60%", "Value": f"{neg_ratio:.3f}", "Score": f"{neg_ratio * 0.60:.3f}"},
-                        {"Component": "Velocity", "Weight": "40%", "Value": f"{velocity:.3f}", "Score": f"{velocity * 0.40:.3f}"},
+                        {"Component": "Negative Ratio / Sentiment (60%)", "Base Value": f"{neg_ratio:.3f}", "Final Value": f"{neg_ratio * 0.60:.3f}"},
+                        {"Component": "Velocity (40%)", "Base Value": f"{velocity:.3f}", "Final Value": f"{velocity * 0.40:.3f}"},
                     ]
                     st.caption("ℹ️ ONM: risk score dihitung dari sentiment + velocity")
                 else:
                     risk_components = [
-                        {"Component": "Negative Ratio", "Weight": "30%", "Value": f"{neg_ratio:.3f}", "Score": f"{neg_ratio * 0.30:.3f}"},
-                        {"Component": "Velocity", "Weight": "25%", "Value": f"{velocity:.3f}", "Score": f"{velocity * 0.25:.3f}"},
-                        {"Component": "Influencer Impact", "Weight": "25%", "Value": f"{influencer:.3f}", "Score": f"{influencer * 0.25:.3f}"},
-                        {"Component": "Misinformation Score", "Weight": "20%", "Value": f"{misinfo:.3f}", "Score": f"{misinfo * 0.20:.3f}"}
+                        {"Component": "Negative Ratio (30%)", "Base Value": f"{neg_ratio:.3f}", "Final Value": f"{neg_ratio * 0.30:.3f}"},
+                        {"Component": "Velocity (25%)", "Base Value": f"{velocity:.3f}", "Final Value": f"{velocity * 0.25:.3f}"},
+                        {"Component": "Influencer Impact (25%)", "Base Value": f"{influencer:.3f}", "Final Value": f"{influencer * 0.25:.3f}"},
+                        {"Component": "Misinformation Score (20%)", "Base Value": f"{misinfo:.3f}", "Final Value": f"{misinfo * 0.20:.3f}"}
                     ]
 
                 risk_df = pd.DataFrame(risk_components)
@@ -1419,9 +1419,8 @@ def main():
                     hide_index=True,
                     column_config={
                         "Component": st.column_config.TextColumn("Component", width="medium"),
-                        "Weight": st.column_config.TextColumn("Weight", width="small"),
-                        "Value": st.column_config.TextColumn("Value", width="small"),
-                        "Score": st.column_config.TextColumn("Weighted", width="small"),
+                        "Base Value": st.column_config.TextColumn("Base Value", width="small"),
+                        "Final Value": st.column_config.TextColumn("Final Value", width="small"),
                     }
                 )
 
@@ -1432,10 +1431,10 @@ def main():
                 st.error(f"Error displaying risk breakdown: {str(err)}")
                 # Show fallback table
                 risk_components = [
-                    {"Component": "Negative Ratio", "Weight": "30%", "Value": "0.300", "Score": "0.090"},
-                    {"Component": "Velocity", "Weight": "25%", "Value": "0.100", "Score": "0.025"},
-                    {"Component": "Influencer Impact", "Weight": "25%", "Value": "0.500", "Score": "0.125"},
-                    {"Component": "Misinformation Score", "Weight": "20%", "Value": "0.100", "Score": "0.020"}
+                    {"Component": "Negative Ratio (30%)", "Base Value": "0.300", "Final Value": "0.090"},
+                    {"Component": "Velocity (25%)", "Base Value": "0.100", "Final Value": "0.025"},
+                    {"Component": "Influencer Impact (25%)", "Base Value": "0.500", "Final Value": "0.125"},
+                    {"Component": "Misinformation Score (20%)", "Base Value": "0.100", "Final Value": "0.020"}
                 ]
                 risk_df = pd.DataFrame(risk_components)
                 st.table(risk_df)
@@ -1443,10 +1442,10 @@ def main():
             # Show default table when no data
             st.warning("No data available - showing default values")
             risk_components = [
-                {"Component": "Negative Ratio", "Weight": "30%", "Value": "0.300", "Score": "0.090"},
-                {"Component": "Velocity", "Weight": "25%", "Value": "0.100", "Score": "0.025"},
-                {"Component": "Influencer Impact", "Weight": "25%", "Value": "0.500", "Score": "0.125"},
-                {"Component": "Misinformation Score", "Weight": "20%", "Value": "0.100", "Score": "0.020"}
+                {"Component": "Negative Ratio (30%)", "Base Value": "0.300", "Final Value": "0.090"},
+                {"Component": "Velocity (25%)", "Base Value": "0.100", "Final Value": "0.025"},
+                {"Component": "Influencer Impact (25%)", "Base Value": "0.500", "Final Value": "0.125"},
+                {"Component": "Misinformation Score (20%)", "Base Value": "0.100", "Final Value": "0.020"}
             ]
             risk_df = pd.DataFrame(risk_components)
             st.table(risk_df)
