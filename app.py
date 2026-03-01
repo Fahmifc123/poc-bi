@@ -517,11 +517,14 @@ def calculate_risk_metrics(daily_df, raw_df=None, source='Social Media'):
     daily_df['is_spike'] = daily_df['negative_ratio'] > threshold
     daily_df['velocity'] = daily_df['volume'].pct_change().fillna(0).abs().clip(0, 1)
 
-    # ONM: risk score dari sentiment saja
+    # ONM: risk score dari sentiment + velocity saja
     if source == 'Online Media':
         daily_df['influencer_impact'] = 0.0
         daily_df['misinformation_score'] = 0.0
-        daily_df['risk_score'] = daily_df['negative_ratio']
+        daily_df['risk_score'] = (
+            0.60 * daily_df['negative_ratio'] +
+            0.40 * daily_df['velocity']
+        )
         return daily_df
 
     # Social Media / All: full formula
@@ -973,10 +976,11 @@ def main():
                 hovertemplate='<b>%{x}</b><br>Count: %{y:,}<br>Percentage: %{text}<extra></extra>'
             )])
             
+            yaxis_max = emotion_counts_filtered.max() * 1.2 if not emotion_counts_filtered.empty else 1
             fig_emotion.update_layout(
                 margin=dict(l=20, r=20, t=40, b=60),
                 showlegend=False,
-                yaxis_title='Count',
+                yaxis=dict(title='Count', range=[0, yaxis_max]),
                 xaxis_title='Emotion',
                 xaxis_tickangle=-45,
                 height=400
@@ -1052,9 +1056,10 @@ def main():
                 topic_negative_pct = topic_data['negative_ratio'].values[0] * 100 if not topic_data.empty else 0
                 
                 anger_pct, fear_pct, joy_pct, trust_pct = 0, 0, 0, 0
-                if 'final_emotion' in df_filtered.columns:
+                # ONM tidak punya emotion, hanya Social Media & All
+                if data_source != 'Online Media' and 'final_emotion' in df_filtered.columns:
                     topic_emotions = df_filtered[
-                        (df_filtered['final_topic'] == current_topic) & 
+                        (df_filtered['final_topic'] == current_topic) &
                         (df_filtered['final_emotion'].notna()) &
                         (df_filtered['final_emotion'] != 'neutral')
                     ]
@@ -1065,35 +1070,37 @@ def main():
                         fear_pct = (emotion_counts.get('fear', 0) / total_emotion * 100) if total_emotion > 0 else 0
                         joy_pct = (emotion_counts.get('joy', 0) / total_emotion * 100) if total_emotion > 0 else 0
                         trust_pct = (emotion_counts.get('trust', 0) / total_emotion * 100) if total_emotion > 0 else 0
-                
+
                 st.markdown(f"<br><strong>📈 Total Data:</strong> {topic_volume:,}", unsafe_allow_html=True)
                 st.markdown(f"<strong>📉 Negative:</strong> {topic_negative_pct:.1f}%", unsafe_allow_html=True)
-                
-                emotion_html = f"""
-                <div style='display: flex; gap: 0.8rem; margin-top: 0.7rem; flex-wrap: wrap;'>
-                    <div style='flex: 1; min-width: 70px; text-align: center; background: rgba(220, 53, 69, 0.1); padding: 0.4rem; border-radius: 6px;'>
-                        <span style='color: #dc3545; font-size: 1.1rem;'>😠</span><br>
-                        <small style='color: #dc3545;'><strong>Anger</strong></small><br>
-                        <strong style='color: #dc3545;'>{anger_pct:.1f}%</strong>
+
+                # Emotion cards hanya untuk Social Media & All (ONM tidak punya emotion)
+                if data_source != 'Online Media':
+                    emotion_html = f"""
+                    <div style='display: flex; gap: 0.8rem; margin-top: 0.7rem; flex-wrap: wrap;'>
+                        <div style='flex: 1; min-width: 70px; text-align: center; background: rgba(220, 53, 69, 0.1); padding: 0.4rem; border-radius: 6px;'>
+                            <span style='color: #dc3545; font-size: 1.1rem;'>😠</span><br>
+                            <small style='color: #dc3545;'><strong>Anger</strong></small><br>
+                            <strong style='color: #dc3545;'>{anger_pct:.1f}%</strong>
+                        </div>
+                        <div style='flex: 1; min-width: 70px; text-align: center; background: rgba(255, 193, 7, 0.1); padding: 0.4rem; border-radius: 6px;'>
+                            <span style='color: #ffc107; font-size: 1.1rem;'>😨</span><br>
+                            <small style='color: #ffc107;'><strong>Fear</strong></small><br>
+                            <strong style='color: #ffc107;'>{fear_pct:.1f}%</strong>
+                        </div>
+                        <div style='flex: 1; min-width: 70px; text-align: center; background: rgba(40, 167, 69, 0.1); padding: 0.4rem; border-radius: 6px;'>
+                            <span style='color: #28a745; font-size: 1.1rem;'>😊</span><br>
+                            <small style='color: #28a745;'><strong>Joy</strong></small><br>
+                            <strong style='color: #28a745;'>{joy_pct:.1f}%</strong>
+                        </div>
+                        <div style='flex: 1; min-width: 70px; text-align: center; background: rgba(0, 102, 204, 0.1); padding: 0.4rem; border-radius: 6px;'>
+                            <span style='color: #0066cc; font-size: 1.1rem;'>🤝</span><br>
+                            <small style='color: #0066cc;'><strong>Trust</strong></small><br>
+                            <strong style='color: #0066cc;'>{trust_pct:.1f}%</strong>
+                        </div>
                     </div>
-                    <div style='flex: 1; min-width: 70px; text-align: center; background: rgba(255, 193, 7, 0.1); padding: 0.4rem; border-radius: 6px;'>
-                        <span style='color: #ffc107; font-size: 1.1rem;'>😨</span><br>
-                        <small style='color: #ffc107;'><strong>Fear</strong></small><br>
-                        <strong style='color: #ffc107;'>{fear_pct:.1f}%</strong>
-                    </div>
-                    <div style='flex: 1; min-width: 70px; text-align: center; background: rgba(40, 167, 69, 0.1); padding: 0.4rem; border-radius: 6px;'>
-                        <span style='color: #28a745; font-size: 1.1rem;'>😊</span><br>
-                        <small style='color: #28a745;'><strong>Joy</strong></small><br>
-                        <strong style='color: #28a745;'>{joy_pct:.1f}%</strong>
-                    </div>
-                    <div style='flex: 1; min-width: 70px; text-align: center; background: rgba(0, 102, 204, 0.1); padding: 0.4rem; border-radius: 6px;'>
-                        <span style='color: #0066cc; font-size: 1.1rem;'>🤝</span><br>
-                        <small style='color: #0066cc;'><strong>Trust</strong></small><br>
-                        <strong style='color: #0066cc;'>{trust_pct:.1f}%</strong>
-                    </div>
-                </div>
-                """
-                st.markdown(emotion_html, unsafe_allow_html=True)
+                    """
+                    st.markdown(emotion_html, unsafe_allow_html=True)
                 
                 st.markdown(f"<br><strong>⚖️ Risk:</strong>", unsafe_allow_html=True)
                 if topic_negative_pct > 50:
@@ -1103,10 +1110,19 @@ def main():
                 else:
                     st.markdown("<span class='spike-normal'>✅ Low Risk</span>", unsafe_allow_html=True)
             
+            # Reset recommendation jika topic berubah
+            prev_topic = st.session_state.get('current_topic', None)
+            if prev_topic != current_topic:
+                st.session_state['show_recommendation'] = False
+
             st.session_state['current_topic'] = current_topic
             st.session_state['topic_negative_pct'] = topic_negative_pct
             st.session_state['topic_stats'] = topic_stats
-            st.session_state['topic_emotion_risk'] = (anger_pct * 0.50 + fear_pct * 0.30 - joy_pct * 0.20 - trust_pct * 0.10)
+            # ONM tidak punya emotion risk
+            if data_source != 'Online Media':
+                st.session_state['topic_emotion_risk'] = (anger_pct * 0.50 + fear_pct * 0.30 - joy_pct * 0.20 - trust_pct * 0.10)
+            else:
+                st.session_state['topic_emotion_risk'] = 0
     else:
         st.info("No topic data available. Please ensure 'final_topic' column exists from Colab clustering.")
 
@@ -1166,9 +1182,12 @@ def main():
             # Calculate misinformation score
             topic_misinformation = topic_negative_ratio * topic_velocity
 
-            # ONM: risk score dari sentiment saja
+            # ONM: risk score dari sentiment + velocity saja
             if data_source == 'Online Media':
-                topic_risk_score = topic_negative_ratio
+                topic_risk_score = (
+                    0.60 * topic_negative_ratio +
+                    0.40 * topic_velocity
+                )
                 topic_influencer_impact = 0.0
                 topic_misinformation = 0.0
             else:
@@ -1243,12 +1262,13 @@ def main():
                 influencer = topic_risk_data['influencer_impact']
                 misinfo = topic_risk_data['misinformation_score']
 
-                # ONM: hanya tampilkan Negative Ratio
+                # ONM: tampilkan Sentiment + Velocity
                 if data_source == 'Online Media':
                     risk_components = [
-                        {"Component": "Negative Ratio (Sentiment)", "Weight": "100%", "Value": f"{neg_ratio:.3f}", "Score": f"{neg_ratio:.3f}"},
+                        {"Component": "Negative Ratio (Sentiment)", "Weight": "60%", "Value": f"{neg_ratio:.3f}", "Score": f"{neg_ratio * 0.60:.3f}"},
+                        {"Component": "Velocity", "Weight": "40%", "Value": f"{velocity:.3f}", "Score": f"{velocity * 0.40:.3f}"},
                     ]
-                    st.caption("ℹ️ ONM: risk score dihitung dari sentiment saja")
+                    st.caption("ℹ️ ONM: risk score dihitung dari sentiment + velocity")
                 else:
                     risk_components = [
                         {"Component": "Negative Ratio", "Weight": "30%", "Value": f"{neg_ratio:.3f}", "Score": f"{neg_ratio * 0.30:.3f}"},
@@ -1302,17 +1322,19 @@ def main():
     # =============================================================================
     st.markdown("<div class='section-header'>Decision Trigger & AI Recommendation</div>", unsafe_allow_html=True)
     
-    # Decision trigger based on selected topic (combining sentiment + emotion risk)
+    # Decision trigger based on selected topic
     topic_risk = "Low"
     if 'topic_negative_pct' in st.session_state:
         topic_negative_pct = st.session_state['topic_negative_pct']
-        
-        # Get emotion risk if available
-        emotion_risk = st.session_state.get('topic_emotion_risk', 0)
-        
-        # Combined risk assessment: sentiment (60%) + emotion (40%)
-        combined_risk_score = (topic_negative_pct * 0.60) + (emotion_risk * 0.40)
-        
+
+        if data_source == 'Online Media':
+            # ONM: risk dari sentiment saja (tanpa emotion)
+            combined_risk_score = topic_negative_pct
+        else:
+            # Social Media / All: sentiment (60%) + emotion (40%)
+            emotion_risk = st.session_state.get('topic_emotion_risk', 0)
+            combined_risk_score = (topic_negative_pct * 0.60) + (emotion_risk * 0.40)
+
         if combined_risk_score >= 50 or topic_negative_pct > 50:
             topic_risk = "High"
         elif combined_risk_score >= 30 or topic_negative_pct > 30:
@@ -1326,8 +1348,10 @@ def main():
         current_topic = st.session_state.get('current_topic', 'Unknown')
         st.markdown(f"<span style='font-size: 0.9rem;'><strong>Topic:</strong> <span class='topic-tag'>{current_topic}</span></span>", unsafe_allow_html=True)
         
-        # Show combined risk breakdown
-        if 'topic_emotion_risk' in st.session_state:
+        # Show risk breakdown
+        if data_source == 'Online Media':
+            st.markdown(f"<small style='color: #6c757d;'>Sentiment Risk: {topic_negative_pct:.1f}%</small>", unsafe_allow_html=True)
+        elif 'topic_emotion_risk' in st.session_state:
             emotion_risk_display = st.session_state['topic_emotion_risk']
             st.markdown(f"<small style='color: #6c757d;'>Sentiment Risk: {topic_negative_pct:.1f}% | Emotion Risk: {emotion_risk_display:.1f}/100</small>", unsafe_allow_html=True)
         
