@@ -23,3 +23,4 @@ Thumbs.db
 benchmark_loading.py
 test_date_filter.py
 test_topic_summary.py
+.claude
